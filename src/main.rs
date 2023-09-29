@@ -6,6 +6,7 @@ pub mod parser;
 
 use std::{env, process::exit, fs, error::Error, io::{self, Write}};
 
+use parser::Parser;
 use scanner::Scanner;
 
 pub struct Lox{
@@ -15,8 +16,14 @@ pub struct Lox{
 fn run(program: &str, state: &mut Lox){
     let mut scanner = Scanner::new(program.to_string(), state);
     scanner.scan_tokens();
+    let tokens = scanner.tokens;
+    let mut parser = Parser::new(tokens);
 
-    dbg!(scanner.tokens);
+    match parser.expression(){
+        Ok(x) => println!("{}",x),
+        Err(x) => state.error(x),
+    }
+
 }
 
 fn run_file(state: &mut Lox, path: &str) -> io::Result<()>{
@@ -46,8 +53,8 @@ fn run_prompt(state: &mut Lox) -> io::Result<()>{
 }
 
 impl Lox {
-    pub fn error(&mut self,line:usize, message: &str){
-        println!("[line {}] Error: {}",line,message);
+    pub fn error(&mut self,message: String){
+        println!("{}",message);
         self.had_error = true;
     }
 }

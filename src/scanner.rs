@@ -1,8 +1,8 @@
-use std::char;
-use std::collections::HashMap;
 use crate::token_type::Token;
 use crate::token_type::TokenType::{self, *};
 use crate::Lox;
+use std::char;
+use std::collections::HashMap;
 
 pub struct Scanner<'a> {
     keywords: HashMap<String, TokenType>,
@@ -110,7 +110,10 @@ impl<'a> Scanner<'a> {
             self.advance();
         }
         if self.is_at_end() {
-            self.state.error(self.line, "Unterminated string.");
+            self.state.error(format!(
+                "[line {}] Error: {}",
+                self.line, "Unterminated string."
+            ));
         }
         self.advance(); // closing "
         let value = &self.source[self.start + 1..self.current - 1];
@@ -211,7 +214,10 @@ impl<'a> Scanner<'a> {
                 } else if is_alpha(c) {
                     self.identifier()
                 } else {
-                    self.state.error(self.line, "Unexpected character.");
+                    self.state.error(format!(
+                        "[line {}] Error: {}",
+                        self.line, "Unexpected character."
+                    ));
                 }
             }
         }
