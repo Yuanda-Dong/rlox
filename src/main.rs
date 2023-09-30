@@ -3,9 +3,11 @@ pub mod scanner;
 pub mod expr;
 pub mod ast_printer;
 pub mod parser;
+pub mod interpreter;
 
 use std::{env, process::exit, fs, error::Error, io::{self, Write}};
 
+use interpreter::Eval;
 use parser::Parser;
 use scanner::Scanner;
 
@@ -20,9 +22,15 @@ fn run(program: &str, state: &mut Lox){
     let mut parser = Parser::new(tokens);
 
     match parser.expression(){
-        Ok(x) => println!("{}",x),
+        Ok(x) => {
+            match x.evaluate(){
+                Ok(y) => println!("{}",y),
+                Err(y) => state.error(y),
+            }
+        }
         Err(x) => state.error(x),
     }
+
 
 }
 
