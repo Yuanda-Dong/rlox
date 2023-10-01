@@ -1,17 +1,22 @@
+use crate::lox_errors::LoxError;
 use crate::token_type::Token;
 use crate::token_type::TokenType::{self, *};
-use crate::Lox;
-use std::char;
 use std::collections::HashMap;
+use std::{char, mem};
 
-pub struct Scanner<'a> {
+pub struct Scanner {
     keywords: HashMap<String, TokenType>,
     source: Vec<u8>,
-    pub tokens: Vec<Token>,
+    tokens: Vec<Token>,
     start: usize,
     current: usize,
     line: usize,
-    state: &'a mut Lox,
+}
+
+impl Default for Scanner {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 fn hacky_string(value: &[u8]) -> String {
@@ -22,8 +27,8 @@ fn is_alpha(c: char) -> bool {
     c.is_alphabetic() || c == '_'
 }
 
-impl<'a> Scanner<'a> {
-    pub fn new(source: String, state: &mut Lox) -> Scanner {
+impl Scanner {
+    pub fn new() -> Scanner {
         let mut keywords = HashMap::new();
         keywords.insert("and".to_string(), AND);
         keywords.insert("class".to_string(), CLASS);
@@ -41,30 +46,32 @@ impl<'a> Scanner<'a> {
         keywords.insert("true".to_string(), TRUE);
         keywords.insert("var".to_string(), VAR);
         keywords.insert("while".to_string(), WHILE);
-
-        let s = Scanner {
+        Scanner {
             keywords,
-            source: source.bytes().collect(),
+            source: Vec::new(),
             tokens: Vec::new(),
             start: 0,
             current: 0,
             line: 1,
-            state,
-        };
-
-        s
+        }
     }
     // main loop for scanning tokens
-    pub fn scan_tokens(&mut self) {
+    pub fn scan_tokens(&mut self, source: String) -> Result<Vec<Token>, LoxError> {
+        self.start = 0;
+        self.current = 0;
+        self.line = 1;
+        self.source = source.as_bytes().to_vec();
         while !self.is_at_end() {
             self.start = self.current;
-            self.scan_token();
+            self.scan_token()?;
         }
         self.add_token(EOF);
+        Ok(mem::take(&mut self.tokens))
     }
+
     // invariant is self.current < self.source.len()
     fn is_at_end(&self) -> bool {
-        self.current >= self.source.len()
+        self.current >= self.source.len() - 1
     }
     // consumes and returns the current char in source
     fn advance(&mut self) -> char {
@@ -102,22 +109,25 @@ impl<'a> Scanner<'a> {
         self.tokens.push(Token::new(token_type, self.line));
     }
     // scans string token
-    fn string(&mut self) {
+    fn string(&mut self) -> Result<(), LoxError> {
         while self.peek() != '"' && !self.is_at_end() {
             if self.peek() == '\n' {
                 self.line += 1;
             }
             self.advance();
         }
+
+        // current char is " or current char is at end
         if self.is_at_end() {
-            self.state.error(format!(
-                "[line {}] Error: {}",
+            return Err(LoxError::ScanError(format!(
+                "[line {}] {}",
                 self.line, "Unterminated string."
-            ));
+            )));
         }
         self.advance(); // closing "
         let value = &self.source[self.start + 1..self.current - 1];
         self.add_token(TokenType::STRING(hacky_string(value)));
+        Ok(())
     }
     // scans number token
     fn number(&mut self) {
@@ -150,7 +160,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    pub fn scan_token(&mut self) {
+    pub fn scan_token(&mut self) -> Result<(), LoxError> {
         let c = self.advance();
         match c {
             // SINGLE-CHARACTER TOKENS
@@ -207,19 +217,20 @@ impl<'a> Scanner<'a> {
             '\r' => {}
             '\t' => {}
             '\n' => self.line += 1,
-            '"' => self.string(),
+            '"' => self.string()?,
             _ => {
                 if c.is_numeric() {
                     self.number();
                 } else if is_alpha(c) {
                     self.identifier()
                 } else {
-                    self.state.error(format!(
-                        "[line {}] Error: {}",
-                        self.line, "Unexpected character."
-                    ));
+                    return Err(LoxError::ScanError(format!(
+                        "[line {}, {}] {}",
+                        self.line, c, "Unexpected character."
+                    )));
                 }
             }
         }
+        Ok(())
     }
 }

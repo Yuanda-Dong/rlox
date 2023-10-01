@@ -1,6 +1,7 @@
 use std::mem::swap;
 
 use crate::expr::Grouping;
+use crate::lox_errors::LoxError;
 use crate::token_type::TokenType::*;
 use crate::{
     expr::{Binary, Expr, Literal, Unary},
@@ -12,15 +13,28 @@ pub struct Parser {
     current: usize, // points to the next token to be parsed
 }
 
+
+fn error(tk: &Token, message: &str) -> LoxError{
+    LoxError::ParseError(format!("[line {}, {}] {}", tk.line, tk, message))
+}
+
 // Each method for parsing a grammar rule produces a syntax tree for that rule and returns it to
 // the caller.
 
+impl Default for Parser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Parser {
-        Parser { tokens, current: 0 }
+    pub fn new() -> Parser {
+        Parser { tokens: Vec::new(), current: 0 }
     }
 
-    pub fn parse(&mut self) -> Result<Expr,String>{
+    pub fn parse(&mut self, tokens: Vec<Token>) -> Result<Expr,LoxError>{
+        self.tokens = tokens;
+        self.current = 0;
         self.expression()
     }
 
@@ -92,12 +106,12 @@ impl Parser {
     }
 
     // expression → equality ;
-    pub fn expression(&mut self) -> Result<Expr,String> {
+    pub fn expression(&mut self) -> Result<Expr,LoxError> {
         self.equality()
     }
 
     // equality → comparison ( ( "!=" | "==" ) comparison )* ;
-    fn equality(&mut self) -> Result<Expr,String> {
+    fn equality(&mut self) -> Result<Expr,LoxError> {
         let mut expr = self.comparison()?;
         while self.mat(&[BANGEQUAL, EQUALEQUAL]) {
             let operator = self.previous();
@@ -112,7 +126,7 @@ impl Parser {
     }
 
     // comparison → term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
-    fn comparison(&mut self) -> Result<Expr,String> {
+    fn comparison(&mut self) -> Result<Expr,LoxError> {
         let mut expr = self.term()?;
         while self.mat(&[GREATER, GREATEREQUAL, LESS, LESSEQUAL]) {
             let operator = self.previous();
@@ -127,7 +141,7 @@ impl Parser {
     }
 
     // term → factor ( ( "-" | "+" ) factor )* ;
-    fn term(&mut self) -> Result<Expr,String> {
+    fn term(&mut self) -> Result<Expr,LoxError> {
         let mut expr = self.factor()?;
         while self.mat(&[MINUS, PLUS]) {
             let operator = self.previous();
@@ -142,7 +156,7 @@ impl Parser {
     }
 
     // factor → unary ( ( "/" | "*" ) unary )* ;
-    fn factor(&mut self) -> Result<Expr,String> {
+    fn factor(&mut self) -> Result<Expr,LoxError> {
         let mut expr = self.unary()?;
         while self.mat(&[SLASH, STAR]) {
             let operator = self.previous();
@@ -157,7 +171,7 @@ impl Parser {
     }
 
     // unary → ( "!" | "-" ) unary | primary ;
-    fn unary(&mut self) -> Result<Expr,String> {
+    fn unary(&mut self) -> Result<Expr,LoxError> {
         if self.mat(&[BANG, MINUS]) {
             let operator = self.previous();
             let right = self.unary()?;
@@ -170,7 +184,7 @@ impl Parser {
     }
 
     // primary → NUMBER | STRING | "true" | "false" | "nil" | "(" expression ")" ;
-    fn primary(&mut self) -> Result<Expr,String> {
+    fn primary(&mut self) -> Result<Expr,LoxError> {
         if self.mat(&[FALSE, TRUE, NIL]) || self.mat_num_str() {
             return Ok(Expr::Literal(Literal {
                 value: self.previous(),
@@ -182,17 +196,17 @@ impl Parser {
             return Ok(Expr::Grouping(Grouping{ expression: Box::new(expr) }));
         }
 
-        Err("Expect expression.".to_string())
+        Err(error(self.peek(),"Expected expression."))
     }
 
+
     // consumes the token only if it matches
-    fn consume(&mut self, tp: TokenType, message: &'static str) -> Result<Token,String>{
+    fn consume(&mut self, tp: TokenType, message: &str) -> Result<Token,LoxError>{
         if self.check(&tp){
             return Ok(self.advance());
         }
         let cur = self.peek();
-        Err(format!("{}: {}",cur,message))
-
+        Err(error(cur,message))
     }
 
     #[allow(dead_code)]
