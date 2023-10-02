@@ -16,8 +16,7 @@ use std::{
 use lox_errors::LoxError;
 use parser::Parser;
 use scanner::Scanner;
-
-use crate::interpreter::Eval;
+use interpreter::Eval;
 
 pub struct Lox {}
 
@@ -36,7 +35,9 @@ impl Lox {
         let program = fs::read_to_string(path)?;
         match self.run(program){
             Ok(_) =>Ok(()),
-            Err(_) => {
+            Err(x) => {
+                println!("{}",x);
+                println!("exiting...");
                 exit(65)
             }
         }
@@ -66,7 +67,7 @@ fn main() -> io::Result<()> {
         0 => state.run_prompt(),
         1 => state.run_file(args.get(0).unwrap()),
         _ => {
-            println!("Usage: clox [script]");
+            println!("Usage: rlox [script]");
             exit(64);
         }
     }?;

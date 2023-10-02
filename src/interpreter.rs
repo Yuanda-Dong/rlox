@@ -43,7 +43,7 @@ impl Sub for Value {
         if let (Value::NUMBER(x), Value::NUMBER(y)) = (self, rhs) {
             return Ok(Value::NUMBER(x - y));
         }
-        Err("Can't subtract those")
+        Err("Can't subtract these")
     }
 }
 
@@ -53,7 +53,7 @@ impl Mul for Value {
         if let (Value::NUMBER(x), Value::NUMBER(y)) = (self, rhs) {
             return Ok(Value::NUMBER(x * y));
         }
-        Err("Can't multiply those")
+        Err("Can't multiply these")
     }
 }
 
@@ -63,7 +63,7 @@ impl Div for Value {
         if let (Value::NUMBER(x), Value::NUMBER(y)) = (self, rhs) {
             return Ok(Value::NUMBER(x / y));
         }
-        Err("Can't divide those")
+        Err("Can't divide these")
     }
 }
 
@@ -79,7 +79,7 @@ impl Add for Value {
             return Ok(Value::STRING(x));
         }
 
-        Err("Can't add those")
+        Err("Can't add these")
     }
 }
 
