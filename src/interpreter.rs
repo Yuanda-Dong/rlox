@@ -1,11 +1,12 @@
+use crate::environment::Environment;
 use crate::expr::*;
-use crate::lox_errors::LoxError;
+use crate::lox_errors::{LoxError, LoxResult};
 use crate::token_type::{Token, TokenType};
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::ops::{Add, Div, Mul, Neg, Not, Sub};
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum Value {
     NULL,
     BOOLEAN(bool),
@@ -88,7 +89,7 @@ impl Not for Value {
     fn not(self) -> Self::Output {
         match self.is_truthy() {
             Value::BOOLEAN(x) => Value::BOOLEAN(!x),
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 }
@@ -111,36 +112,115 @@ impl Value {
             _ => Value::BOOLEAN(true),
         }
     }
+    fn is_true(&self) -> bool {
+        match self {
+            Value::NULL => false,
+            Value::BOOLEAN(x) => *x,
+            _ => true,
+        }
+    }
 }
 
 pub trait Eval {
-    fn evaluate(self) -> Result<Value, LoxError>;
+    fn evaluate(&self, env: &mut Environment) -> LoxResult<Value>;
+}
+
+pub trait Exe {
+    fn execuate(&self, env: &mut Environment) -> LoxResult<()>;
+}
+
+impl Exe for Expression {
+    fn execuate(&self, env: &mut Environment) -> LoxResult<()> {
+        self.expression.evaluate(env)?;
+        Ok(())
+    }
+}
+
+impl Exe for Print {
+    fn execuate(&self, env: &mut Environment) -> LoxResult<()> {
+        let value = self.expression.evaluate(env)?;
+        println!("{}", value);
+        Ok(())
+    }
+}
+impl Exe for Var {
+    fn execuate(&self, env: &mut Environment) -> LoxResult<()> {
+        let value = self.initialiser.evaluate(env)?;
+        env.define(self.name.clone(), value);
+        Ok(())
+    }
+}
+impl Exe for Block {
+    fn execuate(&self, env: &mut Environment) -> LoxResult<()> {
+        let mut new_env = Environment::new(Some(env));
+        for statement in &self.statements {
+            statement.execuate(&mut new_env)?
+        }
+        Ok(())
+    }
+}
+
+impl Exe for Conditional {
+    fn execuate(&self, env: &mut Environment) -> LoxResult<()> {
+        if self.condition.evaluate(env)?.is_true() {
+            self.then_branch.execuate(env)?;
+        } else if let Some(e) = &self.else_branch {
+            e.execuate(env)?;
+        }
+        Ok(())
+    }
+}
+
+impl Exe for While {
+    fn execuate(&self, env: &mut Environment) -> LoxResult<()> {
+        while self.condition.evaluate(env)?.is_true() {
+            self.body.execuate(env)?
+        }
+        Ok(())
+    }
+}
+
+impl Exe for Stmt {
+    fn execuate(&self, env: &mut Environment) -> LoxResult<()> {
+        match self {
+            Stmt::Expression(x) => x.execuate(env)?,
+            Stmt::Print(x) => x.execuate(env)?,
+            Stmt::Var(x) => x.execuate(env)?,
+            Stmt::Block(x) => x.execuate(env)?,
+            Stmt::Conditional(x) => x.execuate(env)?,
+            Stmt::While(x) => x.execuate(env)?,
+        }
+        Ok(())
+    }
 }
 
 impl Eval for Literal {
-    fn evaluate(self) -> Result<Value, LoxError> {
-        match self.value.token_type {
-            TokenType::NUMBER(x) => Ok(Value::NUMBER(x)),
-            TokenType::STRING(x) => Ok(Value::STRING(x)),
+    fn evaluate(&self, _: &mut Environment) -> LoxResult<Value> {
+        match &self.value.token_type {
+            TokenType::NUMBER(x) => Ok(Value::NUMBER(*x)),
+            TokenType::STRING(x) => Ok(Value::STRING(x.clone())),
             TokenType::TRUE => Ok(Value::BOOLEAN(true)),
             TokenType::FALSE => Ok(Value::BOOLEAN(false)),
             TokenType::NIL => Ok(Value::NULL),
-            _ => Err(error(&self.value, "a literal is a leaf node of the syntax tree")),
+            _ => Err(error(
+                &self.value,
+                "a literal is a leaf node of the syntax tree",
+            )),
         }
     }
 }
 
 impl Eval for Grouping {
-    fn evaluate(self) -> Result<Value, LoxError> {
-        self.expression.evaluate()
+    fn evaluate(&self, env: &mut Environment) -> LoxResult<Value> {
+        self.expression.evaluate(env)
     }
 }
 
 impl Eval for Unary {
-    fn evaluate(self) -> Result<Value, LoxError> {
-        let right = self.right.evaluate()?;
+    fn evaluate(&self, env: &mut Environment) -> LoxResult<Value> {
+        let right = self.right.evaluate(env)?;
         match self.operator.token_type {
-            TokenType::MINUS => right.neg().map_err(|x| error(&self.operator,x)),
+            TokenType::MINUS => right.neg().map_err(|x| error(&self.operator, x)),
             TokenType::BANG => Ok(!(right.is_truthy())),
             _ => Err(error(
                 &self.operator,
@@ -151,9 +231,9 @@ impl Eval for Unary {
 }
 
 impl Eval for Binary {
-    fn evaluate(self) -> Result<Value, LoxError> {
-        let left = self.left.evaluate()?;
-        let right = self.right.evaluate()?;
+    fn evaluate(&self, env: &mut Environment) -> LoxResult<Value> {
+        let left = self.left.evaluate(env)?;
+        let right = self.right.evaluate(env)?;
         match self.operator.token_type {
             TokenType::PLUS => left.add(right).map_err(|x| error(&self.operator, x)),
             TokenType::MINUS => left.sub(right).map_err(|x| error(&self.operator, x)),
@@ -162,35 +242,75 @@ impl Eval for Binary {
             TokenType::LESS => left
                 .partial_cmp(&right)
                 .map(|x| Value::BOOLEAN(x == Ordering::Less))
-                .ok_or(error(&self.operator,"incomparable")),
+                .ok_or(error(&self.operator, "incomparable")),
             TokenType::LESSEQUAL => left
                 .partial_cmp(&right)
                 .map(|x| Value::BOOLEAN(x == Ordering::Less || x == Ordering::Equal))
-                .ok_or(error(&self.operator,"incomparable")),
+                .ok_or(error(&self.operator, "incomparable")),
             TokenType::GREATER => left
                 .partial_cmp(&right)
                 .map(|x| Value::BOOLEAN(x == Ordering::Greater))
-                .ok_or(error(&self.operator,"incomparable")),
+                .ok_or(error(&self.operator, "incomparable")),
             TokenType::GREATEREQUAL => left
                 .partial_cmp(&right)
                 .map(|x| Value::BOOLEAN(x == Ordering::Greater || x == Ordering::Equal))
-                .ok_or(error(&self.operator,"incomparable")),
+                .ok_or(error(&self.operator, "incomparable")),
             TokenType::BANGEQUAL => Ok(Value::BOOLEAN(left != right)),
             TokenType::EQUALEQUAL => Ok(Value::BOOLEAN(left == right)),
-            _ => Err(
-                error(&self.operator, "binary operator consists of only +,-,*, /, <,<=,>.>=, ==, != in Lox")
-            ),
+            _ => Err(error(
+                &self.operator,
+                "binary operator consists of only +,-,*, /, <,<=,>.>=, ==, != in Lox",
+            )),
         }
     }
 }
 
+impl Eval for Variable {
+    fn evaluate(&self, env: &mut Environment) -> LoxResult<Value> {
+        env.get(&self.name)
+    }
+}
+
+impl Eval for Assign {
+    fn evaluate(&self, env: &mut Environment) -> LoxResult<Value> {
+        let value = self.right.evaluate(env)?;
+        env.assign(&self.left, value.clone())?;
+        Ok(value)
+    }
+}
+
+impl Eval for Logical {
+    fn evaluate(&self, env: &mut Environment) -> LoxResult<Value> {
+        let left = self.left.evaluate(env)?;
+        match self.operator.token_type {
+            // evaluate and return right if left is false, otherwise return left
+            TokenType::OR => {
+                if !left.is_true() {
+                    return self.right.evaluate(env);
+                }
+            }
+            // evaluate and return right if left is true, otherwise return right
+            TokenType::AND => {
+                if left.is_true() {
+                    return self.right.evaluate(env);
+                }
+            }
+            _ => unreachable!(),
+        }
+        Ok(left)
+    }
+}
+
 impl Eval for Expr {
-    fn evaluate(self) -> Result<Value, LoxError> {
+    fn evaluate(&self, env: &mut Environment) -> LoxResult<Value> {
         match self {
-            Expr::Literal(x) => x.evaluate(),
-            Expr::Binary(x) => x.evaluate(),
-            Expr::Unary(x) => x.evaluate(),
-            Expr::Grouping(x) => x.evaluate(),
+            Expr::Literal(x) => x.evaluate(env),
+            Expr::Binary(x) => x.evaluate(env),
+            Expr::Unary(x) => x.evaluate(env),
+            Expr::Grouping(x) => x.evaluate(env),
+            Expr::Variable(x) => x.evaluate(env),
+            Expr::Assign(x) => x.evaluate(env),
+            Expr::Logical(x) => x.evaluate(env),
         }
     }
 }

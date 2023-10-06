@@ -63,7 +63,7 @@ impl Display for TokenType {
 }
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct Token {
     pub token_type: TokenType,
     pub line: usize,

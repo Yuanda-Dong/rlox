@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::expr::{Binary, Expr, Grouping, Literal, Unary};
+use crate::expr::{Binary, Expr, Grouping, Literal, Unary, Variable, Assign, Logical};
 
 impl Display for Literal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -25,6 +25,22 @@ impl Display for Grouping {
         write!(f, "(group {})", self.expression)
     }
 }
+impl Display for Variable{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Variable: {}",self.name)
+    }
+}
+impl Display for Assign{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Assign: {} = {}",self.left,self.right)
+    }
+}
+
+impl Display for Logical{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Logical: {} {} {}",self.left,self.operator,self.right)
+    }
+}
 
 
 impl Display for Expr {
@@ -34,6 +50,9 @@ impl Display for Expr {
             Expr::Binary(x) => write!(f, "{}", x)?,
             Expr::Unary(x) => write!(f, "{}", x)?,
             Expr::Grouping(x) => write!(f, "{}", x)?,
+            Expr::Variable(x) => write!(f, "{}",x)?,
+            Expr::Assign(x) => write!(f,"{}",x)?,
+            Expr::Logical(x) => write!(f,"{}",x)?,
         }
         Ok(())
     }

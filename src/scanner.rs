@@ -1,4 +1,4 @@
-use crate::lox_errors::LoxError;
+use crate::lox_errors::{LoxError, LoxResult};
 use crate::token_type::Token;
 use crate::token_type::TokenType::{self, *};
 use std::collections::HashMap;
@@ -56,7 +56,7 @@ impl Scanner {
         }
     }
     // main loop for scanning tokens
-    pub fn scan_tokens(&mut self, source: String) -> Result<Vec<Token>, LoxError> {
+    pub fn scan_tokens(&mut self, source: String) -> LoxResult<Vec<Token>>{
         self.start = 0;
         self.current = 0;
         self.line = 1;
@@ -71,7 +71,7 @@ impl Scanner {
 
     // invariant is self.current < self.source.len()
     fn is_at_end(&self) -> bool {
-        self.current >= self.source.len() - 1
+        self.current >= self.source.len()
     }
     // consumes and returns the current char in source
     fn advance(&mut self) -> char {
@@ -160,7 +160,7 @@ impl Scanner {
         }
     }
 
-    pub fn scan_token(&mut self) -> Result<(), LoxError> {
+    pub fn scan_token(&mut self) -> LoxResult<()> {
         let c = self.advance();
         match c {
             // SINGLE-CHARACTER TOKENS
