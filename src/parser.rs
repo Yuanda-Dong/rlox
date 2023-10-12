@@ -1,7 +1,8 @@
 use crate::expr::{
-    Assign, Block, Conditional, Expression, Grouping, Logical, Print, Stmt, Var, Variable, While,
+    Assign, Block, Call, Conditional, Expression, Grouping, Logical, Print, Stmt, Var, Variable,
+    While, Function,
 };
-use crate::lox_errors::{LoxError, LoxResult};
+use crate::lox_errors::{error, LoxResult};
 use crate::token_type::TokenType::*;
 use crate::{
     expr::{Binary, Expr, Literal, Unary},
@@ -14,35 +15,36 @@ pub struct Parser {
     current: usize, // points to the next token to be parsed
 }
 
-fn error(tk: &Token, message: &str) -> LoxError {
-    LoxError::ParseError(format!("[line {}, {}] {}", tk.line, tk, message))
-}
-
 // Each method for parsing a grammar rule produces a syntax tree for that rule and returns it to
 // the caller.
 
 // program        → declaration* EOF
 
-// declaration    → varDecl | statement;
+// declaration    → funDecl | varDecl | statement;
+// funDecl        → "fun" function
 // varDecl        → "var" IDENTIFIER ("=" expression)? ";"
+// function       → IDENTIFIER "(" parameters? ")" block
+// parameters     → IDENTIFIER ("," IDENTIFIER)*
 // statement      → exprStmt | forStmt | ifStmt | printStmt | whileStmt | block
-// whileStmt      → "while" "(" expression ")" statement;
+// whileStmt      → "while" "(" expression ")" statement
 // ifStmt         → "if" "(" expression ")" statement ("else" statement)?
 // block          → "{" declaration* "}"
 // forStmt        → "for" "(" (valDecl | exprStmt | ";") # initialiser
 //                  expression? ";"                      # condition
-//                  expression ? ")" statement;          # increment, body
+//                  expression ? ")" statement          # increment, body
 // exprStmt       → expression ";"
 // printStmt      → "print" expression ";"
 // expression     → assignment asdfadfsadf
-// assignment     → IDENTIFIER "=" assignment | logic_or;
-// logic_or       → logic_and ( "or" logic_and )* ;
-// logic_and      → equality ( "and" equality )* ;
+// assignment     → IDENTIFIER "=" assignment | logic_or
+// logic_or       → logic_and ( "or" logic_and )*
+// logic_and      → equality ( "and" equality )*
 // equality       → comparison ( ( "!=" | "==" ) comparison )*
 // comparison     → term ( ( ">" | ">=" | "<" | "<=" ) term )*
 // term           → factor ( ( "-" | "+" ) factor )*
 // factor         → unary ( ( "/" | "*" ) unary )*
-// unary          → ( "!" | "-" ) unary | primary
+// unary          → ( "!" | "-" ) unary | call
+// call           → primary("(" arguments? ")")*
+// arguments      → expression ("," expression)*
 // primary        → NUMBER | STRING | "true" | "false" | "nil"| "(" expression ")" | IDENTIFIER
 
 impl Default for Parser {
@@ -73,12 +75,36 @@ impl Parser {
         statements
     }
 
-    // declaration → varDecl | statement;
+    // declaration → funDecl | varDecl | statement;
     fn declaration(&mut self) -> LoxResult<Stmt> {
-        if self.mat(&[VAR]) {
+        if self.mat(&[FUN]){
+            return self.function("function")
+        }
+        else if self.mat(&[VAR]) {
             return self.var_decl();
         }
         self.statement()
+    }
+
+    fn function(&mut self, kind: &str) -> LoxResult<Stmt>{
+        let name = self.consume_ident(&format!("Expect {} name.",kind))?;
+        self.consume(LEFTPAREN, &format!("Expect '(' after {} name.",kind))?;
+        let mut parameters = Vec::new();
+        if !self.check(&RIGHTPAREN) {
+            loop{
+                parameters.push(self.consume_ident("Expect parameter name")?);
+                if parameters.len() >= 255 {
+                    return Err(error(self.peek(), "Can't have more than 255 arguments."));
+                }
+                if !self.mat(&[COMMA]) {
+                    break;
+                }
+            }
+        }
+        self.consume(RIGHTPAREN, "Expect ')' after parameters. ")?;
+        self.consume(LEFTBRACE, &format!("Expect {{ before {} body.",kind))?;
+        let body = self.block()?;
+        Ok(Stmt::Function(Function::new(name, parameters, body)))
     }
 
     // varDecl → "var" IDENTIFIER ("=" expression)? ";"
@@ -113,7 +139,7 @@ impl Parser {
         self.expr_stmt()
     }
 
-    // whileStmt → "while" "(" expression ")" statement;
+    // whileStmt → "while" "(" expression ")" statement
     fn while_stmt(&mut self) -> LoxResult<Stmt> {
         self.consume(LEFTPAREN, "Expect '(' after 'while'.")?;
         let condition = self.expression()?;
@@ -124,7 +150,7 @@ impl Parser {
 
     // forStmt → "for" "(" (valDecl | exprStmt | ";") # initialiser
     //                  expression? ";"                      # condition
-    //                  expression? ")" statement;          # increment, body
+    //                  expression? ")" statement           # increment, body
     fn for_stmt(&mut self) -> LoxResult<Stmt> {
         self.consume(LEFTPAREN, "Expect '(' after 'for'.")?;
         let initialiser = if self.mat(&[SEMICOLON]) {
@@ -188,7 +214,11 @@ impl Parser {
         if self.mat(&[ELSE]) {
             else_branch = Some(Box::new(self.statement()?));
         }
-        Ok(Stmt::Conditional(Conditional::new(condition, then_branch, else_branch)))
+        Ok(Stmt::Conditional(Conditional::new(
+            condition,
+            then_branch,
+            else_branch,
+        )))
     }
 
     // block → "{" declaration* "}"
@@ -321,7 +351,7 @@ impl Parser {
         Ok(expr)
     }
 
-    // logic_or → logic_and ( "or" logic_and )* ;
+    // logic_or → logic_and ( "or" logic_and )*
     pub fn logic_or(&mut self) -> LoxResult<Expr> {
         let mut expr = self.logic_and()?;
         while self.mat(&[OR]) {
@@ -332,7 +362,7 @@ impl Parser {
         Ok(expr)
     }
 
-    // logic_and → equality ( "and" equality )* ;
+    // logic_and → equality ( "and" equality )*
     pub fn logic_and(&mut self) -> LoxResult<Expr> {
         let mut expr = self.equality()?;
         while self.mat(&[OR]) {
@@ -343,18 +373,18 @@ impl Parser {
         Ok(expr)
     }
 
-    // equality → comparison ( ( "!=" | "==" ) comparison )* ;
+    // equality → comparison ( ( "!=" | "==" ) comparison )*
     fn equality(&mut self) -> LoxResult<Expr> {
         let mut expr = self.comparison()?;
         while self.mat(&[BANGEQUAL, EQUALEQUAL]) {
             let operator = self.previous();
             let right = self.comparison()?;
-            expr = Expr::Binary(Binary::new(expr,operator,right));
+            expr = Expr::Binary(Binary::new(expr, operator, right));
         }
         Ok(expr)
     }
 
-    // comparison → term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
+    // comparison → term ( ( ">" | ">=" | "<" | "<=" ) term )*
     fn comparison(&mut self) -> LoxResult<Expr> {
         let mut expr = self.term()?;
         while self.mat(&[GREATER, GREATEREQUAL, LESS, LESSEQUAL]) {
@@ -365,7 +395,7 @@ impl Parser {
         Ok(expr)
     }
 
-    // term → factor ( ( "-" | "+" ) factor )* ;
+    // term → factor ( ( "-" | "+" ) factor )*
     fn term(&mut self) -> LoxResult<Expr> {
         let mut expr = self.factor()?;
         while self.mat(&[MINUS, PLUS]) {
@@ -376,7 +406,7 @@ impl Parser {
         Ok(expr)
     }
 
-    // factor → unary ( ( "/" | "*" ) unary )* ;
+    // factor → unary ( ( "/" | "*" ) unary )*
     fn factor(&mut self) -> LoxResult<Expr> {
         let mut expr = self.unary()?;
         while self.mat(&[SLASH, STAR]) {
@@ -387,17 +417,48 @@ impl Parser {
         Ok(expr)
     }
 
-    // unary → ( "!" | "-" ) unary | primary ;
+    // unary → ( "!" | "-" ) unary | call
     fn unary(&mut self) -> LoxResult<Expr> {
         if self.mat(&[BANG, MINUS]) {
             let operator = self.previous();
             let right = self.unary()?;
             return Ok(Expr::Unary(Unary::new(operator, right)));
         }
-        self.primary()
+        self.call()
     }
 
-    // primary → NUMBER | STRING | "true" | "false" | "nil" | "(" expression ")" | IDENTIFIER;
+    // call → primary("(" arguments? ")")*
+    fn call(&mut self) -> LoxResult<Expr> {
+        let mut expr = self.primary()?;
+        loop {
+            if self.mat(&[LEFTPAREN]) {
+                expr = self.finish_call(expr)?;
+            } else {
+                break;
+            }
+        }
+        Ok(expr)
+    }
+
+    // arguments → expression ("," expression)*
+    fn finish_call(&mut self, callee: Expr) -> LoxResult<Expr> {
+        let mut args = Vec::new();
+        if !self.check(&RIGHTPAREN) {
+            loop {
+                args.push(self.expression()?);
+                if args.len() >= 255 {
+                    return Err(error(self.peek(), "Can't have more than 255 arguments."));
+                }
+                if !self.mat(&[COMMA]) {
+                    break;
+                }
+            }
+        }
+        let paren = self.consume(RIGHTPAREN, "Expect ')' after arguments. ")?;
+        Ok(Expr::Call(Call::new(callee, paren, args)))
+    }
+
+    // primary → NUMBER | STRING | "true" | "false" | "nil" | "(" expression ")" | IDENTIFIER
     fn primary(&mut self) -> LoxResult<Expr> {
         if self.mat(&[FALSE, TRUE, NIL]) || self.mat_num_str() {
             return Ok(Expr::Literal(Literal::new(self.previous())));

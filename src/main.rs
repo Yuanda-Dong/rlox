@@ -10,11 +10,11 @@ pub mod token_type;
 use std::{
     env, fs,
     io::{self, Write},
-    process::exit,
+    process::exit, time::{SystemTime, UNIX_EPOCH},
 };
 
 use environment::Environment;
-use interpreter::Exe;
+use interpreter::{Exe, Value, NativeFn};
 use lox_errors::LoxError;
 use parser::Parser;
 use scanner::Scanner;
@@ -66,7 +66,9 @@ impl Lox {
 fn main() -> io::Result<()> {
     let scanner = Scanner::new();
     let parser = Parser::new();
-    let environment = Environment::new(None);
+    let mut environment = Environment::new(None);
+    let clock = Value::NativeFn(NativeFn{ arity: 0,name:"<native fn>".to_string(), f: |_| {let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64(); Some(Value::NUMBER(t))} });
+    environment.native_def("clock", clock);
     let mut lox = Lox {
         scanner,
         parser,

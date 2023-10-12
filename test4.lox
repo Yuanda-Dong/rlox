@@ -1,0 +1,13 @@
+fun count() {
+
+fun add(a, b, c) {
+  print a + b + c;
+}
+
+add(1, 2, 3);
+
+}
+
+for(var i = 0; i < 10; i = i + 1){
+  count();
+}

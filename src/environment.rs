@@ -23,6 +23,10 @@ impl Environment {
         }
     }
 
+    pub fn native_def(&mut self, name: &str, value: Value){
+        self.values.insert(name.to_string(), value);
+    }
+
     pub fn define(&mut self, name: Token, value: Value) {
         match name.token_type {
             TokenType::IDENTIFIER(x) => {

@@ -1,0 +1,5 @@
+fun count(i) {
+  print i;
+}
+
+count(0);

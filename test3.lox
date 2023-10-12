@@ -1,0 +1,7 @@
+var x = clock();
+var z = 0;
+for (var i = 0; i < 10000; i = i + 1){
+    z = z + 1;
+}
+var y = clock();
+print y-x;

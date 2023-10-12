@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use crate::token_type::Token;
+
 pub enum LoxError{
     ParseError(String), ScanError(String), RunTimeError(String)
 }
@@ -13,4 +15,8 @@ impl Display for LoxError{
             LoxError::RunTimeError(x) => write!(f,"RunTimeError {}",x),
         }
     }
+}
+
+pub fn error(tk: &Token, message: &str) -> LoxError {
+    LoxError::RunTimeError(format!("[line {}, {}] {}", tk.line, tk, message))
 }

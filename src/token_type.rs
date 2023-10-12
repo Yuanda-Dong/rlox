@@ -14,7 +14,18 @@ pub enum TokenType {
 
     // KEYWORDS
     AND, CLASS, ELSE, FALSE, FUN, FOR, IF, NIL, OR, PRINT, RETURN, SUPER, THIS, TRUE, VAR, WHILE, EOF,
+
+    // DEFAULT
+    NOTATOKEN
 }
+
+impl Default for TokenType{
+    fn default() -> Self {
+        TokenType::NOTATOKEN
+    }
+}
+
+
 impl Display for TokenType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -37,7 +48,7 @@ impl Display for TokenType {
             TokenType::GREATEREQUAL => write!(f, ">=")?,
             TokenType::LESS => write!(f, "<")?,
             TokenType::LESSEQUAL => write!(f, "<=")?,
-            TokenType::IDENTIFIER(x) => write!(f, "ident: {}", x)?,
+            TokenType::IDENTIFIER(x) => write!(f, "{}", x)?,
             TokenType::STRING(x) => write!(f, "\"{}\"", x)?,
             TokenType::NUMBER(x) => write!(f, "{}", x)?,
             TokenType::AND => write!(f, "AND")?,
@@ -57,13 +68,14 @@ impl Display for TokenType {
             TokenType::VAR => write!(f, "VAR")?,
             TokenType::WHILE => write!(f, "WHILE")?,
             TokenType::EOF => write!(f, "EOF")?,
+            TokenType::NOTATOKEN => write!(f, "Not a Token")?,
         };
         Ok(())
     }
 }
 
 #[allow(dead_code)]
-#[derive(Debug,Clone)]
+#[derive(PartialEq,Debug,Clone,Default)]
 pub struct Token {
     pub token_type: TokenType,
     pub line: usize,
