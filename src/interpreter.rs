@@ -155,7 +155,7 @@ impl Exe for Var {
 }
 impl Exe for Block {
     fn execuate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<()> {
-        let new_env = Rc::new(RefCell::new(Environment::new(Some(&mut env.borrow_mut()))));
+        let new_env = Rc::new(RefCell::new(Environment::new(Some(env.clone()))));
         for statement in &self.statements {
             statement.execuate(new_env.clone())?
         }
@@ -394,7 +394,7 @@ impl Eval for Call {
                         &format!("expected {} args, but got {} args", x.arity, args.len()),
                     ));
                 }
-                let environment = Rc::new(RefCell::new(Environment::new(Some(&mut x.closure.borrow_mut()))));
+                let environment = Rc::new(RefCell::new(Environment::new(Some(x.closure.clone()))));
 
                 for (i,v) in args.iter().enumerate().take(x.arity){
                     if let TokenType::IDENTIFIER(name) =

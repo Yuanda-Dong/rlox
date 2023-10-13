@@ -3,10 +3,10 @@ use crate::{
     lox_errors::{LoxError, LoxResult},
     token_type::{Token, TokenType},
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, rc::Rc, cell::RefCell};
 
 pub struct Environment {
-    pub enclosing: Option<*mut Environment>,
+    pub enclosing: Option<Rc<RefCell<Environment>>>,
     pub values: HashMap<String, Value>,
 }
 
@@ -17,9 +17,9 @@ fn error(tk: &Token, message: &str) -> LoxError {
 
 
 impl Environment {
-    pub fn new(enclosing: Option<&mut Environment>) -> Environment {
+    pub fn new(enclosing: Option<Rc<RefCell<Environment>>>) -> Environment {
         Environment {
-            enclosing: enclosing.map(|x| x as *mut Environment),
+            enclosing,
             values: HashMap::new(),
         }
     }
@@ -42,8 +42,8 @@ impl Environment {
             TokenType::IDENTIFIER(x) => {
                 if let Some(y) = self.values.get(x) {
                     Ok(y.to_owned())
-                } else if let Some(enclosing) = self.enclosing {
-                    unsafe { (*enclosing).get(name) }
+                } else if let Some(enclosing) = &self.enclosing {
+                    enclosing.borrow().get(name)
                 } else {
                     Err(error(name, "undefined variable"))
                 }
@@ -58,8 +58,8 @@ impl Environment {
                 if let Some(y) = self.values.get_mut(x){
                     *y = value;
                     Ok(())
-                } else if let Some(enclosing) = self.enclosing{
-                    unsafe {(*enclosing).assign(name, value)}
+                } else if let Some(enclosing) = &mut self.enclosing{
+                    enclosing.borrow_mut().assign(name, value)
                 }else{
                     Err(error(name, "undefined variable"))
                 }
