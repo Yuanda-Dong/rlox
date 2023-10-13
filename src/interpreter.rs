@@ -1,13 +1,14 @@
 use crate::environment::Environment;
 use crate::expr::*;
-use crate::lox_errors::{error, LoxResult};
+use crate::lox_errors::{error, LoxResult, LoxError};
 use crate::token_type::TokenType;
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::ops::{Add, Div, Mul, Neg, Not, Sub};
+use std::rc::Rc;
 
-
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq,Clone)]
 pub enum Value {
     NULL,
     BOOLEAN(bool),
@@ -15,14 +16,8 @@ pub enum Value {
     STRING(String),
     NativeFn(NativeFn),
     LoxFn(LoxFn),
-    NOTAVALUE
 }
 
-impl Default for Value {
-    fn default() -> Self {
-        Value::NOTAVALUE
-    }
-}
 
 impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -33,7 +28,6 @@ impl Display for Value {
             Value::STRING(x) => write!(f, "{}", x),
             Value::NativeFn(x) => write!(f, "{}", x),
             Value::LoxFn(x) => write!(f, "{}", x),
-            Value::NOTAVALUE => write!(f,"Not a value"),
         }
     }
 }
@@ -131,80 +125,91 @@ impl Value {
 }
 
 pub trait Eval {
-    fn evaluate(&mut self, env: &mut Environment) -> LoxResult<Value>;
+    fn evaluate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<Value>;
 }
 
 pub trait Exe {
-    fn execuate(&mut self, env: &mut Environment) -> LoxResult<()>;
+    fn execuate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<()>;
 }
 
 impl Exe for Expression {
-    fn execuate(&mut self, env: &mut Environment) -> LoxResult<()> {
+    fn execuate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<()> {
         self.expression.evaluate(env)?;
         Ok(())
     }
 }
 
 impl Exe for Print {
-    fn execuate(&mut self, env: &mut Environment) -> LoxResult<()> {
+    fn execuate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<()> {
         let value = self.expression.evaluate(env)?;
         println!("{}", value);
         Ok(())
     }
 }
 impl Exe for Var {
-    fn execuate(&mut self, env: &mut Environment) -> LoxResult<()> {
-        let value = self.initialiser.evaluate(env)?;
-        env.define(std::mem::take(&mut self.name), value);
+    fn execuate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<()> {
+        let value = self.initialiser.evaluate(env.clone())?;
+        env.borrow_mut().define(&self.name, value);
         Ok(())
     }
 }
 impl Exe for Block {
-    fn execuate(&mut self, env: &mut Environment) -> LoxResult<()> {
-        let mut new_env = Environment::new(Some(env));
-        for statement in &mut self.statements {
-            statement.execuate(&mut new_env)?
+    fn execuate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<()> {
+        let new_env = Rc::new(RefCell::new(Environment::new(Some(&mut env.borrow_mut()))));
+        for statement in &self.statements {
+            statement.execuate(new_env.clone())?
         }
         Ok(())
     }
 }
 
 impl Exe for Conditional {
-    fn execuate(&mut self, env: &mut Environment) -> LoxResult<()> {
-        if self.condition.evaluate(env)?.is_true() {
+    fn execuate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<()> {
+        if self.condition.evaluate(env.clone())?.is_true() {
             self.then_branch.execuate(env)?;
-        } else if let Some(e) = &mut self.else_branch {
-            e.execuate(env)?;
+        } else if let Some(e) = &self.else_branch {
+            e.execuate(env.clone())?;
         }
         Ok(())
     }
 }
 
 impl Exe for While {
-    fn execuate(&mut self, env: &mut Environment) -> LoxResult<()> {
-        while self.condition.evaluate(env)?.is_true() {
-            self.body.execuate(env)?
+    fn execuate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<()> {
+        while self.condition.evaluate(env.clone())?.is_true() {
+            self.body.execuate(env.clone())?
         }
         Ok(())
     }
 }
 
-impl Exe for Function {
-    fn execuate(&mut self, env: &mut Environment) -> LoxResult<()> {
-        env.define(
-            std::mem::take(&mut self.name),
+impl Exe for Rc<Function> {
+    fn execuate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<()> {
+        env.borrow_mut().define(
+            &self.name,
             Value::LoxFn(LoxFn {
                 arity: self.params.len(),
                 name: self.name.to_string(),
-                declaration: std::mem::take(self)
+                declaration: self.clone(),
+                closure: env.clone(),
             }),
         );
         Ok(())
     }
 }
 
+impl Exe for Return{
+    fn execuate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<()> {
+        if let Some(v) = &self.value{
+            Err(LoxError::ReturnValue(v.evaluate(env)?))
+        }else{
+            Err(LoxError::ReturnValue(Value::NULL))
+        }
+    }
+}
+
 impl Exe for Stmt {
-    fn execuate(&mut self, env: &mut Environment) -> LoxResult<()> {
+    fn execuate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<()> {
         match self {
             Stmt::Expression(x) => x.execuate(env)?,
             Stmt::Print(x) => x.execuate(env)?,
@@ -213,16 +218,17 @@ impl Exe for Stmt {
             Stmt::Conditional(x) => x.execuate(env)?,
             Stmt::While(x) => x.execuate(env)?,
             Stmt::Function(x) => x.execuate(env)?,
+            Stmt::Return(x) => x.execuate(env)?,
         }
         Ok(())
     }
 }
 
 impl Eval for Literal {
-    fn evaluate(&mut self, _: &mut Environment) -> LoxResult<Value> {
-        match &mut self.value.token_type {
+    fn evaluate(&self, _: Rc<RefCell<Environment>>) -> LoxResult<Value> {
+        match &self.value.token_type {
             TokenType::NUMBER(x) => Ok(Value::NUMBER(*x)),
-            TokenType::STRING(x) => Ok(Value::STRING(std::mem::take(x))),
+            TokenType::STRING(x) => Ok(Value::STRING(x.to_owned())),
             TokenType::TRUE => Ok(Value::BOOLEAN(true)),
             TokenType::FALSE => Ok(Value::BOOLEAN(false)),
             TokenType::NIL => Ok(Value::NULL),
@@ -235,13 +241,13 @@ impl Eval for Literal {
 }
 
 impl Eval for Grouping {
-    fn evaluate(&mut self, env: &mut Environment) -> LoxResult<Value> {
+    fn evaluate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<Value> {
         self.expression.evaluate(env)
     }
 }
 
 impl Eval for Unary {
-    fn evaluate(&mut self, env: &mut Environment) -> LoxResult<Value> {
+    fn evaluate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<Value> {
         let right = self.right.evaluate(env)?;
         match self.operator.token_type {
             TokenType::MINUS => right.neg().map_err(|x| error(&self.operator, x)),
@@ -255,9 +261,9 @@ impl Eval for Unary {
 }
 
 impl Eval for Binary {
-    fn evaluate(&mut self, env: &mut Environment) -> LoxResult<Value> {
-        let left = self.left.evaluate(env)?;
-        let right = self.right.evaluate(env)?;
+    fn evaluate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<Value> {
+        let left = self.left.evaluate(env.clone())?;
+        let right = self.right.evaluate(env.clone())?;
         match self.operator.token_type {
             TokenType::PLUS => left.add(right).map_err(|x| error(&self.operator, x)),
             TokenType::MINUS => left.sub(right).map_err(|x| error(&self.operator, x)),
@@ -290,22 +296,22 @@ impl Eval for Binary {
 }
 
 impl Eval for Variable {
-    fn evaluate(&mut self, env: &mut Environment) -> LoxResult<Value> {
-        env.get(&self.name)
+    fn evaluate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<Value> {
+        env.borrow().get(&self.name)
     }
 }
 
 impl Eval for Assign {
-    fn evaluate(&mut self, env: &mut Environment) -> LoxResult<Value> {
-        let value = self.right.evaluate(env)?;
-        env.assign(&self.left, value.clone())?;
+    fn evaluate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<Value> {
+        let value = self.right.evaluate(env.clone())?;
+        env.borrow_mut().assign(&self.left, value.clone())?;
         Ok(value)
     }
 }
 
 impl Eval for Logical {
-    fn evaluate(&mut self, env: &mut Environment) -> LoxResult<Value> {
-        let left = self.left.evaluate(env)?;
+    fn evaluate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<Value> {
+        let left = self.left.evaluate(env.clone())?;
         match self.operator.token_type {
             // evaluate and return right if left is false, otherwise return left
             TokenType::OR => {
@@ -325,17 +331,7 @@ impl Eval for Logical {
     }
 }
 
-// interface LoxCallable {
-//   int arity();
-//   Object call(Interpreter interpreter, List<Object> arguments);
-// }
-
-// trait LoxCallable {
-//     fn call(args: &Vec<Value>) -> Value;
-//     fn to_string() -> String;
-// }
-
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone)]
 pub struct NativeFn {
     pub arity: usize,
     pub name: String,
@@ -344,29 +340,35 @@ pub struct NativeFn {
 
 impl Display for NativeFn {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.name)
+        write!(f, "<native fn {}>", self.name)
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Clone)]
 pub struct LoxFn {
     pub arity: usize,
     pub name: String,
-    pub declaration: Function,
+    pub declaration: Rc<Function>,
+    pub closure: Rc<RefCell<Environment>>,
+}
+
+impl PartialEq for LoxFn {
+    fn eq(&self, other: &Self) -> bool {
+        self.arity == other.arity && self.name == other.name && Rc::ptr_eq(&self.declaration, &other.declaration)
+    }
 }
 
 impl Display for LoxFn {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.name)
+        write!(f, "<fn {}>", self.name)
     }
 }
 impl Eval for Call {
-    fn evaluate(&mut self, env: &mut Environment) -> LoxResult<Value> {
-        let callee = self.callee.evaluate(env)?;
-        // let args: Vec<Value> = self.args.iter().map(|x| x.evaluate(env)?).collect();
+    fn evaluate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<Value> {
+        let callee = self.callee.evaluate(env.clone())?;
         let mut args = Vec::new();
-        for arg in &mut self.args {
-            args.push(arg.evaluate(env)?);
+        for arg in &self.args {
+            args.push(arg.evaluate(env.clone())?);
         }
 
         match callee {
@@ -385,30 +387,34 @@ impl Eval for Call {
                 let f = callable.f;
                 Ok(f(Some(args)).unwrap())
             }
-            Value::LoxFn(mut x) => {
+            Value::LoxFn(x) => {
                 if args.len() != x.arity {
                     return Err(error(
                         &self.paren,
                         &format!("expected {} args, but got {} args", x.arity, args.len()),
                     ));
                 }
-                let mut environment = Environment::new(Some(env));
-                // for param in &*x.declaration.params{
-                //     environment.native_def(&param.to_string(), args[i])
-                // }
-                for (i,mut v) in args.iter_mut().enumerate().take(x.arity){
+                let environment = Rc::new(RefCell::new(Environment::new(Some(&mut x.closure.borrow_mut()))));
+
+                for (i,v) in args.iter().enumerate().take(x.arity){
                     if let TokenType::IDENTIFIER(name) =
                         &x.declaration.params.get(i).unwrap().token_type
                     {
-                        environment.native_def(name, std::mem::take(&mut v));
+                        environment.borrow_mut().def(name, v.clone());
                     }else{
                         return Err(error(&self.paren,"WTF IS THIS"));
                     }
 
                 }
 
-                for statement in &mut x.declaration.body {
-                    statement.execuate(&mut environment)?
+                for statement in &x.declaration.body {
+                    match statement.execuate(environment.clone()){
+                        Ok(_) => {},
+                        Err(x) => match x{
+                            LoxError::ReturnValue(y) => return Ok(y),
+                            _ => return Err(x),
+                        }
+                    }
                 }
                 Ok(Value::NULL)
             }
@@ -418,7 +424,7 @@ impl Eval for Call {
 }
 
 impl Eval for Expr {
-    fn evaluate(&mut self, env: &mut Environment) -> LoxResult<Value> {
+    fn evaluate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<Value> {
         match self {
             Expr::Literal(x) => x.evaluate(env),
             Expr::Binary(x) => x.evaluate(env),

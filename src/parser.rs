@@ -1,6 +1,6 @@
 use crate::expr::{
-    Assign, Block, Call, Conditional, Expression, Grouping, Logical, Print, Stmt, Var, Variable,
-    While, Function,
+    Assign, Block, Call, Conditional, Expression, Function, Grouping, Logical, Print, Stmt, Var,
+    Variable, While, Return,
 };
 use crate::lox_errors::{error, LoxResult};
 use crate::token_type::TokenType::*;
@@ -9,6 +9,7 @@ use crate::{
     token_type::{Token, TokenType},
 };
 use std::mem::swap;
+use std::rc::Rc;
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -19,13 +20,12 @@ pub struct Parser {
 // the caller.
 
 // program        → declaration* EOF
-
 // declaration    → funDecl | varDecl | statement;
 // funDecl        → "fun" function
 // varDecl        → "var" IDENTIFIER ("=" expression)? ";"
 // function       → IDENTIFIER "(" parameters? ")" block
 // parameters     → IDENTIFIER ("," IDENTIFIER)*
-// statement      → exprStmt | forStmt | ifStmt | printStmt | whileStmt | block
+// statement      → exprStmt | forStmt | ifStmt | printStmt | returnStmt | whileStmt | block
 // whileStmt      → "while" "(" expression ")" statement
 // ifStmt         → "if" "(" expression ")" statement ("else" statement)?
 // block          → "{" declaration* "}"
@@ -34,7 +34,8 @@ pub struct Parser {
 //                  expression ? ")" statement          # increment, body
 // exprStmt       → expression ";"
 // printStmt      → "print" expression ";"
-// expression     → assignment asdfadfsadf
+// returnStmt     → "return" expression? ";"
+// expression     → assignment
 // assignment     → IDENTIFIER "=" assignment | logic_or
 // logic_or       → logic_and ( "or" logic_and )*
 // logic_and      → equality ( "and" equality )*
@@ -77,21 +78,20 @@ impl Parser {
 
     // declaration → funDecl | varDecl | statement;
     fn declaration(&mut self) -> LoxResult<Stmt> {
-        if self.mat(&[FUN]){
-            return self.function("function")
-        }
-        else if self.mat(&[VAR]) {
+        if self.mat(&[FUN]) {
+            return self.function("function");
+        } else if self.mat(&[VAR]) {
             return self.var_decl();
         }
         self.statement()
     }
 
-    fn function(&mut self, kind: &str) -> LoxResult<Stmt>{
-        let name = self.consume_ident(&format!("Expect {} name.",kind))?;
-        self.consume(LEFTPAREN, &format!("Expect '(' after {} name.",kind))?;
+    fn function(&mut self, kind: &str) -> LoxResult<Stmt> {
+        let name = self.consume_ident(&format!("Expect {} name.", kind))?;
+        self.consume(LEFTPAREN, &format!("Expect '(' after {} name.", kind))?;
         let mut parameters = Vec::new();
         if !self.check(&RIGHTPAREN) {
-            loop{
+            loop {
                 parameters.push(self.consume_ident("Expect parameter name")?);
                 if parameters.len() >= 255 {
                     return Err(error(self.peek(), "Can't have more than 255 arguments."));
@@ -102,9 +102,11 @@ impl Parser {
             }
         }
         self.consume(RIGHTPAREN, "Expect ')' after parameters. ")?;
-        self.consume(LEFTBRACE, &format!("Expect {{ before {} body.",kind))?;
+        self.consume(LEFTBRACE, &format!("Expect {{ before {} body.", kind))?;
         let body = self.block()?;
-        Ok(Stmt::Function(Function::new(name, parameters, body)))
+        Ok(Stmt::Function(Rc::new(Function::new(
+            name, parameters, body,
+        ))))
     }
 
     // varDecl → "var" IDENTIFIER ("=" expression)? ";"
@@ -123,10 +125,12 @@ impl Parser {
         Ok(Stmt::Var(Var::new(name, initialiser)))
     }
 
-    // statement → exprStmt | forStmt | ifStmt | printStmt | block
+    // statement → exprStmt | forStmt | ifStmt | printStmt | returnStmt | whileStmt | block
     fn statement(&mut self) -> LoxResult<Stmt> {
         if self.mat(&[PRINT]) {
             return self.print_stmt();
+        } else if self.mat(&[RETURN]) {
+            return self.return_stmt();
         } else if self.mat(&[WHILE]) {
             return self.while_stmt();
         } else if self.mat(&[FOR]) {
@@ -137,6 +141,18 @@ impl Parser {
             return Ok(Stmt::Block(Block::new(self.block()?)));
         }
         self.expr_stmt()
+    }
+
+    // returnStmt → "return" expression? ";"
+    fn return_stmt(&mut self) -> LoxResult<Stmt> {
+        let keyword = self.previous();
+        let value = if !self.check(&SEMICOLON){
+            Some(self.expression()?)
+        }else{
+            None
+        };
+        self.consume(SEMICOLON, "Expect ';' after return value.")?;
+        Ok(Stmt::Return(Return::new(keyword, value)))
     }
 
     // whileStmt → "while" "(" expression ")" statement

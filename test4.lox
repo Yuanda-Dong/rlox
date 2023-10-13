@@ -1,13 +1,8 @@
-fun count() {
-
-fun add(a, b, c) {
-  print a + b + c;
+fun count(n) {
+  if (n > 1) count(n - 1);
+  print n;
 }
 
-add(1, 2, 3);
-
-}
-
-for(var i = 0; i < 10; i = i + 1){
-  count();
-}
+count(3);
+print clock;
+print count;

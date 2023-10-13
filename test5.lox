@@ -1,5 +1,6 @@
-fun count(i) {
-  print i;
+fun procedure() {
+  print "don't return anything";
 }
 
-count(0);
+var result = procedure();
+print result; // ?

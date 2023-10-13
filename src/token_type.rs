@@ -19,12 +19,6 @@ pub enum TokenType {
     NOTATOKEN
 }
 
-impl Default for TokenType{
-    fn default() -> Self {
-        TokenType::NOTATOKEN
-    }
-}
-
 
 impl Display for TokenType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
@@ -75,7 +69,7 @@ impl Display for TokenType {
 }
 
 #[allow(dead_code)]
-#[derive(PartialEq,Debug,Clone,Default)]
+#[derive(PartialEq,Debug,Clone)]
 pub struct Token {
     pub token_type: TokenType,
     pub line: usize,

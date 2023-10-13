@@ -5,7 +5,6 @@ use crate::{
 };
 use std::collections::HashMap;
 
-#[derive(Debug)]
 pub struct Environment {
     pub enclosing: Option<*mut Environment>,
     pub values: HashMap<String, Value>,
@@ -15,6 +14,8 @@ fn error(tk: &Token, message: &str) -> LoxError {
     LoxError::RunTimeError(format!("[line {}, {}] {}", tk.line, tk, message))
 }
 
+
+
 impl Environment {
     pub fn new(enclosing: Option<&mut Environment>) -> Environment {
         Environment {
@@ -23,14 +24,14 @@ impl Environment {
         }
     }
 
-    pub fn native_def(&mut self, name: &str, value: Value){
+    pub fn def(&mut self, name: &str, value: Value){
         self.values.insert(name.to_string(), value);
     }
 
-    pub fn define(&mut self, name: Token, value: Value) {
-        match name.token_type {
+    pub fn define(&mut self, name: &Token, value: Value) {
+        match &name.token_type {
             TokenType::IDENTIFIER(x) => {
-                self.values.insert(x, value);
+                self.values.insert(x.clone(), value);
             }
             _ => unreachable!(),
         }

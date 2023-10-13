@@ -10,7 +10,7 @@ pub mod token_type;
 use std::{
     env, fs,
     io::{self, Write},
-    process::exit, time::{SystemTime, UNIX_EPOCH},
+    process::exit, time::{SystemTime, UNIX_EPOCH}, rc::Rc, cell::RefCell,
 };
 
 use environment::Environment;
@@ -22,7 +22,7 @@ use scanner::Scanner;
 pub struct Lox {
     scanner: Scanner,
     parser: Parser,
-    environment: Environment,
+    environment: Rc<RefCell<Environment>>,
 }
 
 impl Lox {
@@ -30,7 +30,7 @@ impl Lox {
         let tokens = self.scanner.scan_tokens(program)?;
         let statements = self.parser.parse(tokens);
         for stmt in statements {
-            stmt?.execuate(&mut self.environment)?;
+            stmt?.execuate(self.environment.clone())?;
         }
         Ok(())
     }
@@ -67,12 +67,12 @@ fn main() -> io::Result<()> {
     let scanner = Scanner::new();
     let parser = Parser::new();
     let mut environment = Environment::new(None);
-    let clock = Value::NativeFn(NativeFn{ arity: 0,name:"<native fn>".to_string(), f: |_| {let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64(); Some(Value::NUMBER(t))} });
-    environment.native_def("clock", clock);
+    let clock = Value::NativeFn(NativeFn{ arity: 0,name:"clock".to_string(), f: |_| {let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64(); Some(Value::NUMBER(t))} });
+    environment.def("clock", clock);
     let mut lox = Lox {
         scanner,
         parser,
-        environment,
+        environment:Rc::new(RefCell::new(environment)),
     };
     let args: Vec<String> = env::args().skip(1).collect();
     match args.len() {
