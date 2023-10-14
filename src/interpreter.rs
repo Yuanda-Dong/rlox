@@ -1,6 +1,6 @@
 use crate::environment::Environment;
 use crate::expr::*;
-use crate::lox_errors::{error, LoxResult, LoxError};
+use crate::lox_errors::{run_error, LoxResult, LoxError};
 use crate::token_type::TokenType;
 use std::cell::RefCell;
 use std::cmp::Ordering;
@@ -183,13 +183,13 @@ impl Exe for While {
     }
 }
 
-impl Exe for Rc<Function> {
+impl Exe for Rc<RefCell<Function>> {
     fn execuate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<()> {
         env.borrow_mut().define(
-            &self.name,
+            &self.borrow().name,
             Value::LoxFn(LoxFn {
-                arity: self.params.len(),
-                name: self.name.to_string(),
+                arity: self.borrow().params.len(),
+                name: self.borrow().name.to_string(),
                 declaration: self.clone(),
                 closure: env.clone(),
             }),
@@ -232,7 +232,7 @@ impl Eval for Literal {
             TokenType::TRUE => Ok(Value::BOOLEAN(true)),
             TokenType::FALSE => Ok(Value::BOOLEAN(false)),
             TokenType::NIL => Ok(Value::NULL),
-            _ => Err(error(
+            _ => Err(run_error(
                 &self.value,
                 "a literal is a leaf node of the syntax tree",
             )),
@@ -250,9 +250,9 @@ impl Eval for Unary {
     fn evaluate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<Value> {
         let right = self.right.evaluate(env)?;
         match self.operator.token_type {
-            TokenType::MINUS => right.neg().map_err(|x| error(&self.operator, x)),
+            TokenType::MINUS => right.neg().map_err(|x| run_error(&self.operator, x)),
             TokenType::BANG => Ok(!(right.is_truthy())),
-            _ => Err(error(
+            _ => Err(run_error(
                 &self.operator,
                 "unary operator consists of only - and ! in Lox",
             )),
@@ -265,29 +265,29 @@ impl Eval for Binary {
         let left = self.left.evaluate(env.clone())?;
         let right = self.right.evaluate(env.clone())?;
         match self.operator.token_type {
-            TokenType::PLUS => left.add(right).map_err(|x| error(&self.operator, x)),
-            TokenType::MINUS => left.sub(right).map_err(|x| error(&self.operator, x)),
-            TokenType::STAR => left.mul(right).map_err(|x| error(&self.operator, x)),
-            TokenType::SLASH => left.div(right).map_err(|x| error(&self.operator, x)),
+            TokenType::PLUS => left.add(right).map_err(|x| run_error(&self.operator, x)),
+            TokenType::MINUS => left.sub(right).map_err(|x| run_error(&self.operator, x)),
+            TokenType::STAR => left.mul(right).map_err(|x| run_error(&self.operator, x)),
+            TokenType::SLASH => left.div(right).map_err(|x| run_error(&self.operator, x)),
             TokenType::LESS => left
                 .partial_cmp(&right)
                 .map(|x| Value::BOOLEAN(x == Ordering::Less))
-                .ok_or(error(&self.operator, "incomparable")),
+                .ok_or(run_error(&self.operator, "incomparable")),
             TokenType::LESSEQUAL => left
                 .partial_cmp(&right)
                 .map(|x| Value::BOOLEAN(x == Ordering::Less || x == Ordering::Equal))
-                .ok_or(error(&self.operator, "incomparable")),
+                .ok_or(run_error(&self.operator, "incomparable")),
             TokenType::GREATER => left
                 .partial_cmp(&right)
                 .map(|x| Value::BOOLEAN(x == Ordering::Greater))
-                .ok_or(error(&self.operator, "incomparable")),
+                .ok_or(run_error(&self.operator, "incomparable")),
             TokenType::GREATEREQUAL => left
                 .partial_cmp(&right)
                 .map(|x| Value::BOOLEAN(x == Ordering::Greater || x == Ordering::Equal))
-                .ok_or(error(&self.operator, "incomparable")),
+                .ok_or(run_error(&self.operator, "incomparable")),
             TokenType::BANGEQUAL => Ok(Value::BOOLEAN(left != right)),
             TokenType::EQUALEQUAL => Ok(Value::BOOLEAN(left == right)),
-            _ => Err(error(
+            _ => Err(run_error(
                 &self.operator,
                 "binary operator consists of only +,-,*, /, <,<=,>.>=, ==, != in Lox",
             )),
@@ -297,14 +297,14 @@ impl Eval for Binary {
 
 impl Eval for Variable {
     fn evaluate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<Value> {
-        env.borrow().get(&self.name)
+        env.borrow().get_at(&self.name, self.hop)
     }
 }
 
 impl Eval for Assign {
     fn evaluate(&self, env: Rc<RefCell<Environment>>) -> LoxResult<Value> {
         let value = self.right.evaluate(env.clone())?;
-        env.borrow_mut().assign(&self.left, value.clone())?;
+        env.borrow_mut().assign_at(&self.left, value.clone(),self.hops)?;
         Ok(value)
     }
 }
@@ -348,7 +348,7 @@ impl Display for NativeFn {
 pub struct LoxFn {
     pub arity: usize,
     pub name: String,
-    pub declaration: Rc<Function>,
+    pub declaration: Rc<RefCell<Function>>,
     pub closure: Rc<RefCell<Environment>>,
 }
 
@@ -374,7 +374,7 @@ impl Eval for Call {
         match callee {
             Value::NativeFn(callable) => {
                 if args.len() != callable.arity {
-                    return Err(error(
+                    return Err(run_error(
                         &self.paren,
                         &format!(
                             "expected {} args, but got {} args",
@@ -389,7 +389,7 @@ impl Eval for Call {
             }
             Value::LoxFn(x) => {
                 if args.len() != x.arity {
-                    return Err(error(
+                    return Err(run_error(
                         &self.paren,
                         &format!("expected {} args, but got {} args", x.arity, args.len()),
                     ));
@@ -398,16 +398,16 @@ impl Eval for Call {
 
                 for (i,v) in args.iter().enumerate().take(x.arity){
                     if let TokenType::IDENTIFIER(name) =
-                        &x.declaration.params.get(i).unwrap().token_type
+                        &x.declaration.borrow().params.get(i).unwrap().token_type
                     {
                         environment.borrow_mut().def(name, v.clone());
                     }else{
-                        return Err(error(&self.paren,"WTF IS THIS"));
+                        return Err(run_error(&self.paren,"WTF IS THIS"));
                     }
 
                 }
 
-                for statement in &x.declaration.body {
+                for statement in &x.declaration.borrow().body {
                     match statement.execuate(environment.clone()){
                         Ok(_) => {},
                         Err(x) => match x{
@@ -418,7 +418,7 @@ impl Eval for Call {
                 }
                 Ok(Value::NULL)
             }
-            _ => Err(error(&self.paren, "only callable can be called"))
+            _ => Err(run_error(&self.paren, "only callable can be called"))
         }
     }
 }
@@ -437,6 +437,9 @@ impl Eval for Expr {
         }
     }
 }
+
+
+
 
 #[cfg(test)]
 mod tests {

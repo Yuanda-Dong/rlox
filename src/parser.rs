@@ -2,12 +2,13 @@ use crate::expr::{
     Assign, Block, Call, Conditional, Expression, Function, Grouping, Logical, Print, Stmt, Var,
     Variable, While, Return,
 };
-use crate::lox_errors::{error, LoxResult};
+use crate::lox_errors::{parse_error,LoxResult};
 use crate::token_type::TokenType::*;
 use crate::{
     expr::{Binary, Expr, Literal, Unary},
     token_type::{Token, TokenType},
 };
+use std::cell::RefCell;
 use std::mem::swap;
 use std::rc::Rc;
 
@@ -94,7 +95,7 @@ impl Parser {
             loop {
                 parameters.push(self.consume_ident("Expect parameter name")?);
                 if parameters.len() >= 255 {
-                    return Err(error(self.peek(), "Can't have more than 255 arguments."));
+                    return Err(parse_error(self.peek(), "Can't have more than 255 arguments."));
                 }
                 if !self.mat(&[COMMA]) {
                     break;
@@ -104,9 +105,9 @@ impl Parser {
         self.consume(RIGHTPAREN, "Expect ')' after parameters. ")?;
         self.consume(LEFTBRACE, &format!("Expect {{ before {} body.", kind))?;
         let body = self.block()?;
-        Ok(Stmt::Function(Rc::new(Function::new(
+        Ok(Stmt::Function(Rc::new(RefCell::new(Function::new(
             name, parameters, body,
-        ))))
+        )))))
     }
 
     // varDecl → "var" IDENTIFIER ("=" expression)? ";"
@@ -362,7 +363,7 @@ impl Parser {
             if let Expr::Variable(v) = expr {
                 return Ok(Expr::Assign(Assign::new(v.name, value)));
             }
-            return Err(error(&equals, "Invalid assignment target."));
+            return Err(parse_error(&equals, "Invalid assignment target."));
         }
         Ok(expr)
     }
@@ -381,7 +382,7 @@ impl Parser {
     // logic_and → equality ( "and" equality )*
     pub fn logic_and(&mut self) -> LoxResult<Expr> {
         let mut expr = self.equality()?;
-        while self.mat(&[OR]) {
+        while self.mat(&[AND]) {
             let operator = self.previous();
             let right = self.equality()?;
             expr = Expr::Logical(Logical::new(expr, operator, right))
@@ -463,7 +464,7 @@ impl Parser {
             loop {
                 args.push(self.expression()?);
                 if args.len() >= 255 {
-                    return Err(error(self.peek(), "Can't have more than 255 arguments."));
+                    return Err(parse_error(self.peek(), "Can't have more than 255 arguments."));
                 }
                 if !self.mat(&[COMMA]) {
                     break;
@@ -491,7 +492,7 @@ impl Parser {
             return Ok(Expr::Grouping(Grouping::new(expr)));
         }
 
-        Err(error(self.peek(), "Expected expression."))
+        Err(parse_error(self.peek(), "Expected expression."))
     }
 
     // consumes the token only if it matches
@@ -500,7 +501,7 @@ impl Parser {
             return Ok(self.advance());
         }
         let cur = self.peek();
-        Err(error(cur, message))
+        Err(parse_error(cur, message))
     }
 
     fn consume_ident(&mut self, message: &str) -> LoxResult<Token> {
@@ -508,7 +509,7 @@ impl Parser {
             return Ok(self.advance());
         }
         let cur = self.peek();
-        Err(error(cur, message))
+        Err(parse_error(cur, message))
     }
 
     fn sync(&mut self) {

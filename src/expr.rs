@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{rc::Rc, cell::RefCell};
 
 use crate::token_type::Token;
 
@@ -66,19 +66,28 @@ impl Literal {
 
 pub struct Variable {
     pub name: Token,
+    pub hop: Option<usize>,
 }
 
 impl Variable {
-    pub fn new(name: Token) -> Self { Self { name } }
+    pub fn new(name: Token) -> Self { Self { name,hop:None } }
+    pub fn get_name(&self) -> &str{
+        match &self.name.token_type{
+            crate::token_type::TokenType::IDENTIFIER(x) => x,
+            _ => unreachable!()
+        }
+        
+    }
 }
 
 pub struct Assign {
     pub left: Token,
     pub right: Box<Expr>,
+    pub hops: Option<usize>,
 }
 
 impl Assign {
-    pub fn new(left: Token, right: Expr) -> Self { Self { left, right: Box::new(right) } }
+    pub fn new(left: Token, right: Expr) -> Self { Self { left, right: Box::new(right), hops: None } }
 }
 
 pub struct Unary {
@@ -98,7 +107,7 @@ pub enum Stmt {
     Block(Block),
     Conditional(Conditional),
     While(While),
-    Function(Rc<Function>)
+    Function(Rc<RefCell<Function>>)
 }
 
 pub struct Return {

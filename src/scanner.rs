@@ -149,7 +149,7 @@ impl Scanner {
     }
     // scan the next keyword or identifier
     fn identifier(&mut self) {
-        while self.peek().is_alphanumeric() {
+        while self.peek().is_alphanumeric() || self.peek() == '_'{
             self.advance();
         }
         let text = hacky_string(&self.source[self.start..self.current]);

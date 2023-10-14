@@ -6,6 +6,7 @@ pub mod lox_errors;
 pub mod parser;
 pub mod scanner;
 pub mod token_type;
+pub mod resolver;
 
 use std::{
     env, fs,
@@ -17,20 +18,25 @@ use environment::Environment;
 use interpreter::{Exe, Value, NativeFn};
 use lox_errors::LoxError;
 use parser::Parser;
+use resolver::{Resolver, Resolve};
 use scanner::Scanner;
 
 pub struct Lox {
     scanner: Scanner,
     parser: Parser,
+    resolver:Resolver,
     environment: Rc<RefCell<Environment>>,
 }
 
 impl Lox {
     fn run(&mut self, program: String) -> Result<(), LoxError> {
         let tokens = self.scanner.scan_tokens(program)?;
-        let statements = self.parser.parse(tokens);
-        for stmt in statements {
-            stmt?.execuate(self.environment.clone())?;
+        let mut statements = self.parser.parse(tokens).into_iter().collect::<Result<Vec<_>,LoxError>>()?;
+        for stmt in &mut statements{
+            stmt.resolve(&mut self.resolver)?;
+        }
+        for stmt in &mut statements {
+            stmt.execuate(self.environment.clone())?;
         }
         Ok(())
     }
@@ -66,12 +72,14 @@ impl Lox {
 fn main() -> io::Result<()> {
     let scanner = Scanner::new();
     let parser = Parser::new();
+    let resolver = Resolver::new();
     let mut environment = Environment::new(None);
     let clock = Value::NativeFn(NativeFn{ arity: 0,name:"clock".to_string(), f: |_| {let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64(); Some(Value::NUMBER(t))} });
     environment.def("clock", clock);
     let mut lox = Lox {
         scanner,
         parser,
+        resolver,
         environment:Rc::new(RefCell::new(environment)),
     };
     let args: Vec<String> = env::args().skip(1).collect();
