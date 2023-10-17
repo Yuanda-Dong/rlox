@@ -11,7 +11,39 @@ pub enum Expr {
     Assign(Assign),
     Logical(Logical),
     Call(Call),
+    Get(Get),
+    Set(Set),
+    This(This),
 }
+
+pub struct Get{
+    pub object: Box<Expr>,
+    pub name: Token,
+}
+pub struct This{
+    pub keyword: Token,
+    pub hops: Option<usize>,
+}
+
+impl This {
+    pub fn new(keyword: Token) -> Self { Self { keyword, hops: None } }
+}
+
+pub struct Set{
+    pub object: Box<Expr>,
+    pub name: Token,
+    pub value: Box<Expr>,
+}
+
+impl Set {
+    pub fn new(object: Box<Expr>, name: Token, value: Expr) -> Self { Self { object, name, value: Box::new(value) } }
+    
+}
+
+impl Get {
+    pub fn new(object: Expr, name: Token) -> Self { Self { object: Box::new(object), name } }
+}
+
 pub struct Call{
     pub callee: Box<Expr>,
     pub paren: Token,
@@ -107,7 +139,17 @@ pub enum Stmt {
     Block(Block),
     Conditional(Conditional),
     While(While),
-    Function(Rc<RefCell<Function>>)
+    Function(Rc<RefCell<Function>>),
+    Class(Class),
+}
+
+pub struct Class{
+    pub name: Token,
+    pub methods: Vec<Rc<RefCell<Function>>>
+}
+
+impl Class {
+    pub fn new(name: Token, methods: Vec<Rc<RefCell<Function>>>) -> Self { Self { name, methods } }
 }
 
 pub struct Return {
@@ -124,8 +166,6 @@ pub struct Function{
     pub params: Vec<Token>,
     pub body: Vec<Stmt>,
 }
-
-
 
 impl Function {
     pub fn new(name: Token, params: Vec<Token>, body: Vec<Stmt>) -> Self { Self { name, params, body } }

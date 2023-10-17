@@ -1,6 +1,6 @@
 use crate::{
     interpreter::Value,
-    lox_errors::{LoxResult, run_error},
+    lox_errors::{run_error, LoxResult},
     token_type::{Token, TokenType},
 };
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
@@ -45,6 +45,21 @@ impl Environment {
             _ => unreachable!(),
         }
     }
+
+    // fn get_mut (&mut self, name: &Token) -> LoxResult<*mut Value> {
+    //     match &name.token_type {
+    //         TokenType::IDENTIFIER(x) => {
+    //             if let Some(y) = self.values.get_mut(x) {
+    //                 Ok(y)
+    //             } else if let Some(enclosing) = &self.enclosing {
+    //                 enclosing.borrow_mut().get_mut(name)
+    //             } else {
+    //                 Err(run_error(name, "undefined variable"))
+    //             }
+    //         }
+    //         _ => unreachable!(),
+    //     }
+    // }
 
     pub fn get_at(&self, name: &Token, distance: Option<usize>) -> LoxResult<Value> {
         match &name.token_type {

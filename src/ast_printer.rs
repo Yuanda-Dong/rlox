@@ -53,7 +53,10 @@ impl Display for Expr {
             Expr::Variable(x) => write!(f, "{}",x)?,
             Expr::Assign(x) => write!(f,"{}",x)?,
             Expr::Logical(x) => write!(f,"{}",x)?,
-            Expr::Call(_) => todo!(),
+            Expr::Call(_x) => todo!(),
+            Expr::Get(_x) => todo!(),
+            Expr::Set(_) => todo!(),
+            Expr::This(_) => todo!(),
         }
         Ok(())
     }

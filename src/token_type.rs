@@ -1,5 +1,7 @@
 use std::fmt::{self, Display};
 
+use crate::lox_errors::{LoxResult, run_error};
+
 #[derive(Clone, Debug, PartialEq)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum TokenType {
@@ -79,11 +81,18 @@ impl Token {
     pub fn new(token_type: TokenType, line: usize) -> Token {
         Token { token_type, line }
     }
+
+    pub fn get_id(&self) -> LoxResult<&str>{
+        if let TokenType::IDENTIFIER(x) = &self.token_type{
+            Ok(x)
+        }else{
+            Err(run_error(self, "only IDENTIFIER is valid key in environment"))
+        }
+    }
 }
 
 impl Display for Token{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // write!(f,"Line: {} {}",self.line, self.token_type)?;
         write!(f,"{}",self.token_type)?;
         Ok(())
     }

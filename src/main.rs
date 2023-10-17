@@ -36,7 +36,7 @@ impl Lox {
             stmt.resolve(&mut self.resolver)?;
         }
         for stmt in &mut statements {
-            stmt.execuate(self.environment.clone())?;
+            stmt.execuate(&self.environment)?;
         }
         Ok(())
     }
