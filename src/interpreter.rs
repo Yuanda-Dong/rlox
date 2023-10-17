@@ -2,6 +2,7 @@ use crate::environment::Environment;
 use crate::expr::*;
 use crate::lox_errors::{run_error, LoxError, LoxResult};
 use crate::token_type::TokenType;
+use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -14,7 +15,7 @@ pub enum Value {
     NULL,
     BOOLEAN(bool),
     NUMBER(f64),
-    STRING(Rc<RefCell<String>>),
+    STRING(String),
     NativeFn(NativeFn),
     LoxFn(Rc<RefCell<LoxFn>>),
     LoxClass(Rc<RefCell<LoxClass>>),
@@ -27,7 +28,7 @@ impl Display for Value {
             Value::NULL => write!(f, "nil"),
             Value::BOOLEAN(x) => write!(f, "{}", x),
             Value::NUMBER(x) => write!(f, "{}", x),
-            Value::STRING(x) => write!(f, "{}", x.borrow()),
+            Value::STRING(x) => write!(f, "{}", x),
             Value::NativeFn(x) => write!(f, "{}", x),
             Value::LoxFn(x) => write!(f, "{}", x.borrow()),
             Value::LoxClass(x) => write!(f, "{}", x.borrow()),
@@ -82,8 +83,8 @@ impl Add for Value {
         if let (Value::NUMBER(x), Value::NUMBER(y)) = (&self, &rhs) {
             return Ok(Value::NUMBER(x + y));
         }
-        if let (Value::STRING(x), Value::STRING(y)) = (self, rhs) {
-            x.borrow_mut().push_str(&y.borrow());
+        if let (Value::STRING(mut x), Value::STRING(y)) = (self, rhs) {
+            x.push_str(&y);
             return Ok(Value::STRING(x));
         }
 
@@ -219,7 +220,7 @@ impl Exe for Class {
         for method in &self.methods {
             methods.insert(
                 method.borrow().name.to_string(),
-                Value::LoxFn(Rc::new(RefCell::new(LoxFn::new(method, env))))
+                Value::LoxFn(Rc::new(RefCell::new(LoxFn::new(method, env)))),
             );
         }
         let klass = Value::LoxClass(Rc::new(RefCell::new(LoxClass {
@@ -386,6 +387,11 @@ impl LoxFn {
             closure: env.clone(),
         }
     }
+    pub fn bind(&mut self, instance: Rc<RefCell<LoxInstance>>) -> LoxFn {
+        let mut environment = Environment::new(Some(self.closure.clone()));
+        environment.def("this", Value::LoxInstance(instance));
+        return LoxFn::new(&self.declaration, &Rc::new(RefCell::new(environment)));
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -400,8 +406,8 @@ impl Display for LoxClass {
     }
 }
 
-impl LoxClass{
-    fn find_method(&self, name:&str) -> Option<Value>{
+impl LoxClass {
+    fn find_method(&self, name: &str) -> Option<Value> {
         self.methods.get(name).cloned()
     }
 }
@@ -513,14 +519,28 @@ impl Eval for Get {
         let object = self.object.evaluate(env)?;
         match object {
             Value::LoxInstance(x) => {
-                if let Some(y) = x.borrow().fields.get(self.name.get_id()?).cloned(){
+                if let Some(y) = x.borrow().fields.get(self.name.get_id()?).cloned() {
                     Ok(y)
-                }else if let Some(y) = x.borrow().lox_class.borrow().find_method(self.name.get_id()?){
-                    Ok(y)
-                }else{
-                    Err(run_error(&self.name, &format!("Undefeind property {}",self.name)))
+                } else if let Some(y) = x
+                    .borrow()
+                    .lox_class
+                    .borrow()
+                    .find_method(self.name.get_id()?)
+                {
+                    match y {
+                        Value::LoxFn(z) => {
+                            z.borrow_mut().bind(x.clone());
+                            Ok(Value::LoxFn(z))
+                        }
+                        _ => unreachable!(),
+                    }
+                } else {
+                    Err(run_error(
+                        &self.name,
+                        &format!("Undefeind property {}", self.name),
+                    ))
                 }
-            },
+            }
             _ => Err(run_error(&self.name, "Only instances have properties")),
         }
     }
@@ -535,11 +555,15 @@ impl Eval for Set {
                 x.borrow_mut()
                     .fields
                     .insert(self.name.to_string(), value.clone());
-                // env.borrow_mut().def(&object.to_string(), Value::LoxInstance(x));
                 Ok(value)
             }
             _ => Err(run_error(&self.name, "Only instances have properties")),
         }
+    }
+}
+impl Eval for This {
+    fn evaluate(&self, env: &Rc<RefCell<Environment>>) -> LoxResult<Value> {
+        env.borrow().borrow_mut().get_at(&self.keyword, self.hops)
     }
 }
 
@@ -556,7 +580,7 @@ impl Eval for Expr {
             Expr::Call(x) => x.evaluate(env),
             Expr::Get(x) => x.evaluate(env),
             Expr::Set(x) => x.evaluate(env),
-            Expr::This(_) => todo!(),
+            Expr::This(x) => x.evaluate(env),
         }
     }
 }
