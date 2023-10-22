@@ -1,6 +1,6 @@
 use crate::expr::{
     Assign, Block, Call, Class, Conditional, Expression, Function, Get, Grouping, Logical, Print,
-    Return, Stmt, Var, Variable, While, Set, This,
+    Return, Set, Stmt, This, Var, Variable, While, Super,
 };
 use crate::lox_errors::{parse_error, LoxResult};
 use crate::token_type::TokenType::*;
@@ -22,7 +22,7 @@ pub struct Parser {
 
 // program        → declaration* EOF
 // declaration    → classDecl | funDecl | varDecl | statement;
-// classDecl      → "class" IDENTIFIER "{" function* "}""
+// classDecl      → "class" IDENTIFIER ("<" IDENTIFIER)? "{" function* "}""
 // funDecl        → "fun" function
 // varDecl        → "var" IDENTIFIER ("=" expression)? ";"
 // function       → IDENTIFIER "(" parameters? ")" block
@@ -48,7 +48,7 @@ pub struct Parser {
 // unary          → ( "!" | "-" ) unary | call
 // call           → primary("(" arguments? ")" | "." IDENTIFIER)*
 // arguments      → expression ("," expression)*
-// primary        → NUMBER | STRING | "true" | "false" | "nil"| "(" expression ")" | IDENTIFIER
+// primary        → NUMBER | STRING | "true" | "false" | "nil"| "(" expression ")" | IDENTIFIER | "super" "." IDENTIFIER
 
 impl Default for Parser {
     fn default() -> Self {
@@ -93,16 +93,24 @@ impl Parser {
     // classDecl → "class" IDENTIFIER "{" function* "}""
     fn class_decl(&mut self) -> LoxResult<Stmt> {
         let name = self.consume_ident("Expect class name.")?;
+
+        let mut superclass = None;
+
+        if self.mat(&[LESS]) {
+            let x = self.consume_ident("Expect super class name.")?;
+            superclass = Some(Variable::new(x))
+        }
+
         self.consume(LEFTBRACE, "Expect '{' before class body.")?;
         let mut methods = vec![];
         while !self.check(&RIGHTBRACE) && !self.is_at_end() {
-            match self.function("method")?{
+            match self.function("method")? {
                 Stmt::Function(x) => methods.push(x),
-                _ => return Err(parse_error(self.peek(), "only methods are allowed"))
+                _ => return Err(parse_error(self.peek(), "only methods are allowed")),
             }
         }
         self.consume(RIGHTBRACE, "Expect '}' after class body")?;
-        Ok(Stmt::Class(Class::new(name, methods)))
+        Ok(Stmt::Class(Class::new(name, methods, superclass)))
     }
 
     fn function(&mut self, kind: &str) -> LoxResult<Stmt> {
@@ -384,8 +392,8 @@ impl Parser {
             let value = self.assignment()?;
             if let Expr::Variable(v) = expr {
                 return Ok(Expr::Assign(Assign::new(v.name, value)));
-            }else if let Expr::Get(x) = expr{
-                return Ok(Expr::Set(Set::new(x.object, x.name, value)))
+            } else if let Expr::Get(x) = expr {
+                return Ok(Expr::Set(Set::new(x.object, x.name, value)));
             }
             return Err(parse_error(&equals, "Invalid assignment target."));
         }
@@ -505,14 +513,21 @@ impl Parser {
         Ok(Expr::Call(Call::new(callee, paren, args)))
     }
 
-    // primary → NUMBER | STRING | "true" | "false" | "nil" | this | "(" expression ")" | IDENTIFIER
+    // primary        → NUMBER | STRING | "true" | "false" | "nil"| "(" expression ")" | IDENTIFIER | "super" "." IDENTIFIER
     fn primary(&mut self) -> LoxResult<Expr> {
         if self.mat(&[FALSE, TRUE, NIL]) || self.mat_num_str() {
             return Ok(Expr::Literal(Literal::new(self.previous())));
         }
 
-        if self.mat(&[THIS]){
+        if self.mat(&[THIS]) {
             return Ok(Expr::This(This::new(self.previous())));
+        }
+
+        if self.mat(&[SUPER]){
+            let keyword = self.previous();
+            self.consume(DOT, "Expect '.' after 'super'")?;
+            let method = self.consume_ident("Expect superclass method name.")?;
+            return Ok(Expr::Super(Super::new(keyword, method)))
         }
 
         if self.mat_ident() {

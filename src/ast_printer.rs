@@ -57,6 +57,7 @@ impl Display for Expr {
             Expr::Get(_x) => todo!(),
             Expr::Set(_) => todo!(),
             Expr::This(_) => todo!(),
+            Expr::Super(_) => todo!(),
         }
         Ok(())
     }

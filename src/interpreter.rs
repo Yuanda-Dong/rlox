@@ -1,8 +1,7 @@
 use crate::environment::Environment;
 use crate::expr::*;
 use crate::lox_errors::{run_error, LoxError, LoxResult};
-use crate::token_type::TokenType;
-use std::borrow::BorrowMut;
+use crate::token_type::{Token, TokenType};
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -10,12 +9,12 @@ use std::fmt::Display;
 use std::ops::{Add, Div, Mul, Neg, Not, Sub};
 use std::rc::Rc;
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum Value {
     NULL,
     BOOLEAN(bool),
     NUMBER(f64),
-    STRING(String),
+    STRING(Rc<RefCell<String>>),
     NativeFn(NativeFn),
     LoxFn(Rc<RefCell<LoxFn>>),
     LoxClass(Rc<RefCell<LoxClass>>),
@@ -28,7 +27,7 @@ impl Display for Value {
             Value::NULL => write!(f, "nil"),
             Value::BOOLEAN(x) => write!(f, "{}", x),
             Value::NUMBER(x) => write!(f, "{}", x),
-            Value::STRING(x) => write!(f, "{}", x),
+            Value::STRING(x) => write!(f, "{}", x.borrow()),
             Value::NativeFn(x) => write!(f, "{}", x),
             Value::LoxFn(x) => write!(f, "{}", x.borrow()),
             Value::LoxClass(x) => write!(f, "{}", x.borrow()),
@@ -83,8 +82,8 @@ impl Add for Value {
         if let (Value::NUMBER(x), Value::NUMBER(y)) = (&self, &rhs) {
             return Ok(Value::NUMBER(x + y));
         }
-        if let (Value::STRING(mut x), Value::STRING(y)) = (self, rhs) {
-            x.push_str(&y);
+        if let (Value::STRING(x), Value::STRING(y)) = (self, rhs) {
+            x.borrow_mut().push_str(&y.borrow());
             return Ok(Value::STRING(x));
         }
 
@@ -197,6 +196,7 @@ impl Exe for Rc<RefCell<Function>> {
                 name: self.borrow().name.to_string(),
                 declaration: self.clone(),
                 closure: env.clone(),
+                is_init: false,
             }))),
         );
         Ok(())
@@ -215,17 +215,42 @@ impl Exe for Return {
 
 impl Exe for Class {
     fn execuate(&self, env: &Rc<RefCell<Environment>>) -> LoxResult<()> {
+        let mut realsuperclass = None;
+        if let Some(x) = &self.super_class {
+            let superclass = x.evaluate(env)?;
+            if let Value::LoxClass(y) = superclass {
+                realsuperclass = Some(y);
+            } else {
+                return Err(run_error(&x.name, "Superclass must be a class"));
+            }
+        }
         env.borrow_mut().define(&self.name, Value::NULL);
+
+        let mut new_env = env.clone();
+        if let Some(x) = &self.super_class {
+            let superclass = x.evaluate(env)?;
+            new_env = Rc::new(RefCell::new(Environment::new(Some(new_env))));
+            new_env.borrow_mut().def("super", superclass)
+        }
+
         let mut methods = HashMap::new();
         for method in &self.methods {
-            methods.insert(
-                method.borrow().name.to_string(),
-                Value::LoxFn(Rc::new(RefCell::new(LoxFn::new(method, env)))),
-            );
+            if method.borrow().name.to_string() == "init" {
+                methods.insert(
+                    method.borrow().name.to_string(),
+                    Value::LoxFn(Rc::new(RefCell::new(LoxFn::new(method, &new_env, true)))),
+                );
+            } else {
+                methods.insert(
+                    method.borrow().name.to_string(),
+                    Value::LoxFn(Rc::new(RefCell::new(LoxFn::new(method, &new_env, false)))),
+                );
+            }
         }
         let klass = Value::LoxClass(Rc::new(RefCell::new(LoxClass {
             name: self.name.to_string(),
             methods,
+            superclass: realsuperclass,
         })));
         env.borrow_mut().assign(&self.name, klass)?;
         Ok(())
@@ -357,7 +382,7 @@ impl Eval for Logical {
     }
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 pub struct NativeFn {
     pub arity: usize,
     pub name: String,
@@ -370,34 +395,78 @@ impl Display for NativeFn {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LoxFn {
     pub arity: usize,
     pub name: String,
     pub declaration: Rc<RefCell<Function>>,
     pub closure: Rc<RefCell<Environment>>,
+    pub is_init: bool,
 }
 
 impl LoxFn {
-    pub fn new(f: &Rc<RefCell<Function>>, env: &Rc<RefCell<Environment>>) -> LoxFn {
+    pub fn new(f: &Rc<RefCell<Function>>, env: &Rc<RefCell<Environment>>, is_init: bool) -> LoxFn {
         LoxFn {
             arity: f.borrow().params.len(),
             name: f.borrow().name.to_string(),
             declaration: f.clone(),
             closure: env.clone(),
+            is_init,
         }
     }
-    pub fn bind(&mut self, instance: Rc<RefCell<LoxInstance>>) -> LoxFn {
+
+    pub fn bind(&mut self, instance: Rc<RefCell<LoxInstance>>) {
         let mut environment = Environment::new(Some(self.closure.clone()));
         environment.def("this", Value::LoxInstance(instance));
-        return LoxFn::new(&self.declaration, &Rc::new(RefCell::new(environment)));
+        self.closure = Rc::new(RefCell::new(environment));
+    }
+    pub fn call(&mut self, args: Vec<Value>, paren: &Token) -> LoxResult<Value> {
+        if args.len() != self.arity {
+            return Err(run_error(
+                paren,
+                &format!("expected {} args, but got {} args", self.arity, args.len()),
+            ));
+        }
+        let environment = Rc::new(RefCell::new(Environment::new(Some(self.closure.clone()))));
+
+        for (i, v) in args.iter().enumerate().take(self.arity) {
+            if let TokenType::IDENTIFIER(name) =
+                &self.declaration.borrow().params.get(i).unwrap().token_type
+            {
+                environment.borrow_mut().def(name, v.clone());
+            } else {
+                return Err(run_error(paren, "???"));
+            }
+        }
+
+        for statement in &self.declaration.borrow().body {
+            match statement.execuate(&environment) {
+                Ok(_) => {}
+                Err(x) => match x {
+                    LoxError::ReturnValue(y) => {
+                        if self.is_init {
+                            return environment.borrow().get_str("this");
+                        } else {
+                            return Ok(y);
+                        }
+                    }
+                    _ => return Err(x),
+                },
+            }
+        }
+        if self.is_init {
+            environment.borrow().get_str("this")
+        } else {
+            Ok(Value::NULL)
+        }
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct LoxClass {
     pub name: String,
     pub methods: HashMap<String, Value>,
+    pub superclass: Option<Rc<RefCell<LoxClass>>>,
 }
 
 impl Display for LoxClass {
@@ -408,11 +477,17 @@ impl Display for LoxClass {
 
 impl LoxClass {
     fn find_method(&self, name: &str) -> Option<Value> {
-        self.methods.get(name).cloned()
+        if let Some(x) = self.methods.get(name).cloned() {
+            Some(x)
+        } else if let Some(x) = &self.superclass {
+            x.borrow().find_method(name)
+        } else {
+            None
+        }
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct LoxInstance {
     pub lox_class: Rc<RefCell<LoxClass>>,
     pub fields: HashMap<String, Value>,
@@ -448,14 +523,16 @@ impl Eval for Call {
 
         match callee {
             Value::LoxClass(x) => {
-                if !args.is_empty() {
-                    return Err(run_error(&self.paren, "Expects 0 args"));
-                }
-                let instance = LoxInstance {
+                let instance = Rc::new(RefCell::new(LoxInstance {
                     lox_class: x.clone(),
                     fields: HashMap::new(),
-                };
-                Ok(Value::LoxInstance(Rc::new(RefCell::new(instance))))
+                }));
+                let initialiser = x.borrow_mut().find_method("init");
+                if let Some(Value::LoxFn(y)) = initialiser {
+                    y.borrow_mut().bind(instance.clone());
+                    y.borrow_mut().call(args, &self.paren)?;
+                }
+                Ok(Value::LoxInstance(instance))
             }
             Value::NativeFn(x) => {
                 if args.len() != x.arity {
@@ -468,48 +545,7 @@ impl Eval for Call {
                 let f = x.f;
                 Ok(f(Some(args)).unwrap())
             }
-            Value::LoxFn(x) => {
-                if args.len() != x.borrow().arity {
-                    return Err(run_error(
-                        &self.paren,
-                        &format!(
-                            "expected {} args, but got {} args",
-                            x.borrow().arity,
-                            args.len()
-                        ),
-                    ));
-                }
-                let environment = Rc::new(RefCell::new(Environment::new(Some(
-                    x.borrow().closure.clone(),
-                ))));
-
-                for (i, v) in args.iter().enumerate().take(x.borrow().arity) {
-                    if let TokenType::IDENTIFIER(name) = &x
-                        .borrow()
-                        .declaration
-                        .borrow()
-                        .params
-                        .get(i)
-                        .unwrap()
-                        .token_type
-                    {
-                        environment.borrow_mut().def(name, v.clone());
-                    } else {
-                        return Err(run_error(&self.paren, "WTF IS THIS"));
-                    }
-                }
-
-                for statement in &x.borrow().declaration.borrow().body {
-                    match statement.execuate(&environment) {
-                        Ok(_) => {}
-                        Err(x) => match x {
-                            LoxError::ReturnValue(y) => return Ok(y),
-                            _ => return Err(x),
-                        },
-                    }
-                }
-                Ok(Value::NULL)
-            }
+            Value::LoxFn(x) => x.borrow_mut().call(args, &self.paren),
             _ => Err(run_error(&self.paren, "only callable can be called")),
         }
     }
@@ -561,9 +597,33 @@ impl Eval for Set {
         }
     }
 }
+
 impl Eval for This {
     fn evaluate(&self, env: &Rc<RefCell<Environment>>) -> LoxResult<Value> {
-        env.borrow().borrow_mut().get_at(&self.keyword, self.hops)
+        env.borrow().get_at(&self.keyword, self.hops)
+    }
+}
+
+impl Eval for Super {
+    fn evaluate(&self, env: &Rc<RefCell<Environment>>) -> LoxResult<Value> {
+        let superclass = env.borrow().get_at(&self.keyword, self.hops)?;
+        let object = env.borrow().get_str("this")?;
+        // let method = supe
+        match superclass {
+            Value::LoxClass(x) => {
+                if let Some(y) = x.borrow().find_method(self.method.get_id()?) {
+                    if let (Value::LoxFn(z),Value::LoxInstance(w)) = (y,object) {
+                        z.borrow_mut().bind(w);
+                        Ok(Value::LoxFn(z))
+                    } else {
+                        return Err(run_error(&self.method, "Undefined property."));
+                    }
+                } else {
+                    return Err(run_error(&self.method, "method not found"));
+                }
+            }
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -581,6 +641,7 @@ impl Eval for Expr {
             Expr::Get(x) => x.evaluate(env),
             Expr::Set(x) => x.evaluate(env),
             Expr::This(x) => x.evaluate(env),
+            Expr::Super(x) => x.evaluate(env),
         }
     }
 }

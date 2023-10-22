@@ -1,10 +1,11 @@
 use crate::{
     interpreter::Value,
-    lox_errors::{run_error, LoxResult},
+    lox_errors::{run_error, LoxResult, LoxError},
     token_type::{Token, TokenType},
 };
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
+#[derive(Debug)]
 pub struct Environment {
     pub enclosing: Option<Rc<RefCell<Environment>>>,
     pub values: HashMap<String, Value>,
@@ -46,6 +47,16 @@ impl Environment {
         }
     }
 
+    pub fn get_str(&self, name: &str) -> LoxResult<Value> {
+        if let Some(y) = self.values.get(name) {
+            Ok(y.to_owned())
+        } else if let Some(enclosing) = &self.enclosing {
+            enclosing.borrow().get_str(name)
+        } else {
+            Err(LoxError::RunTimeError("undefined variable".to_string()))
+        }
+    }
+
     // fn get_mut (&mut self, name: &Token) -> LoxResult<*mut Value> {
     //     match &name.token_type {
     //         TokenType::IDENTIFIER(x) => {
@@ -75,8 +86,37 @@ impl Environment {
                         Err(run_error(name, "undefined variable"))
                     }
                 } else {
-                    //TODO
-                    // println!("im called {} {}.", name, name.line);
+                    self.get(name)
+                }
+            }
+            TokenType::THIS => {
+                if let Some(d) = distance {
+                    let mut env = self as *const Environment;
+                    for _ in 0..d {
+                        env = unsafe { (*env).enclosing.as_ref().unwrap().as_ptr() }
+                    }
+                    if let Some(y) = unsafe { (*env).values.get("this") } {
+                        Ok(y.to_owned())
+                    } else {
+                        Err(run_error(name, "undefined variable"))
+                    }
+                } else {
+                    self.get(name)
+                }
+            }
+
+            TokenType::SUPER => {
+                if let Some(d) = distance {
+                    let mut env = self as *const Environment;
+                    for _ in 0..d {
+                        env = unsafe { (*env).enclosing.as_ref().unwrap().as_ptr() }
+                    }
+                    if let Some(y) = unsafe { (*env).values.get("super") } {
+                        Ok(y.to_owned())
+                    } else {
+                        Err(run_error(name, "undefined variable"))
+                    }
+                } else {
                     self.get(name)
                 }
             }
@@ -120,8 +160,6 @@ impl Environment {
                         Err(run_error(name, "undefined variable"))
                     }
                 } else {
-                    // println!("im called {} {}.", name, name.line);
-                    // TODO
                     self.assign(name, value)
                 }
             }
