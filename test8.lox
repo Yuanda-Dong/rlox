@@ -1,0 +1,8 @@
+class Eclair {
+  cook() {
+    print "Pipe full of crème pâtissière.";
+  }
+}
+
+var v = Eclair();
+v.cook();
